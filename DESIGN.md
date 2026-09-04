@@ -418,6 +418,10 @@ usable, so the viewer moved up from M4 with backlinks left behind.
 **M4 — Links.** `//` and `[[` pickers mid-note, link resolution, backlinks in the viewer,
 `supersedes` and its banner.
 *Usable: it becomes a connected system rather than a pile.*
+Done so far: both triggers, the picker, `[[link]]` insertion, `supersedes:` insertion, and
+links that resolve and are followable from the read-only view. Still owed: backlinks, and
+the banner that makes a supersession visible when reading the note it supersedes — which is
+index work, since it has to be derived from every *other* note.
 
 **M5 — Sync.** git pull/commit/push, tray status, conflict handling.
 *Usable: it works on two machines.*

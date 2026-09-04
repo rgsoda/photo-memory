@@ -16,8 +16,13 @@ const panes = {
 
 /** Matches the `![[name]]` embeds the app writes into a note. */
 const EMBED = /!\[\[([^\]]+)\]\]/g;
-/** Typed into an empty buffer, this opens search. See DESIGN.md §6. */
-const SEARCH_TRIGGER = "//";
+/** Matches a `[[name]]` reference to another note. */
+const LINK = /\[\[([^\]!]+?)\]\]/g;
+/**
+ * Both open the same picker. `//` is the one key to remember; `[[` matches the
+ * on-disk format and carries Obsidian muscle memory. See DESIGN.md §6.
+ */
+const TRIGGERS = ["//", "[["];
 
 const DRAFT_DEBOUNCE_MS = 400;
 const SEARCH_DEBOUNCE_MS = 90;
@@ -25,9 +30,10 @@ const SEARCH_DEBOUNCE_MS = 90;
 const CONFIRM_MS = 450;
 
 const HINTS = {
-  capture: "<kbd>Ctrl</kbd><kbd>↵</kbd> save &nbsp; <kbd>//</kbd> search &nbsp; <kbd>Esc</kbd> dismiss",
+  capture: "<kbd>Ctrl</kbd><kbd>↵</kbd> save &nbsp; <kbd>//</kbd> search &amp; cite &nbsp; <kbd>Esc</kbd> dismiss",
   search: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>Esc</kbd> back",
-  viewer: "<kbd>V</kbd> view image &nbsp; <kbd>Esc</kbd> back to results",
+  viewer: "<kbd>Tab</kbd><kbd>↵</kbd> follow link &nbsp; <kbd>V</kbd> view image &nbsp; <kbd>Esc</kbd> back to results",
+  pick: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> cite &nbsp; <kbd>Ctrl</kbd><kbd>↵</kbd> supersedes &nbsp; <kbd>Esc</kbd> cancel",
 };
 
 let mode = "capture";
@@ -35,6 +41,11 @@ let hits = [];
 let selected = 0;
 /** Image names the open note embeds, for stepping through in the image window. */
 let gallery = [];
+/**
+ * While the picker is up: the trigger's character range in the editor, which
+ * the chosen reference replaces. Null in every other mode.
+ */
+let pick = null;
 let draftTimer = null;
 let searchTimer = null;
 let statusTimer = null;
@@ -48,7 +59,10 @@ function setStatus(text, kind = "") {
 
 function setMode(next) {
   mode = next;
-  for (const [name, pane] of Object.entries(panes)) pane.hidden = name !== next;
+  // The picker is the search pane with a different answer to Enter, exactly as
+  // designed: same index, same widget, same keystroke.
+  const pane = next === "pick" ? "search" : next;
+  for (const [name, el] of Object.entries(panes)) el.hidden = name !== pane;
   hints.innerHTML = HINTS[next];
 }
 
@@ -184,15 +198,85 @@ async function refreshStrip() {
 /* ── search ──────────────────────────────────────────────────────────────── */
 
 function openSearch() {
+  pick = null;
   setMode("search");
+  query.placeholder = "Search notes…";
   query.value = "";
   query.focus();
   runSearch();
 }
 
 function closeSearch() {
+  pick = null;
   setMode("capture");
   focusEditor();
+}
+
+/* ── citing another note ─────────────────────────────────────────────────── */
+
+/**
+ * A trigger only fires at the start of a word, which is what keeps `https://`
+ * and a pasted `// comment` from opening the picker mid-sentence. Returns the
+ * range the trigger occupies, or null.
+ */
+function triggerAt(value, caret) {
+  for (const t of TRIGGERS) {
+    const start = caret - t.length;
+    if (start < 0 || value.slice(start, caret) !== t) continue;
+    if (start > 0 && !/\s/.test(value[start - 1])) continue;
+    return { start, end: caret };
+  }
+  return null;
+}
+
+/** Open the picker over the trigger the user just typed. */
+function openPicker(range) {
+  pick = range;
+  setMode("pick");
+  query.placeholder = "Cite a note…";
+  query.value = "";
+  query.focus();
+  runSearch();
+}
+
+/** Put `text` where the trigger was and go back to typing. */
+function replaceTrigger(text) {
+  const { start, end } = pick;
+  const value = editor.value;
+  editor.value = value.slice(0, start) + text + value.slice(end);
+  const caret = start + text.length;
+  pick = null;
+  setMode("capture");
+  editor.focus();
+  editor.setSelectionRange(caret, caret);
+  queueDraftSave();
+}
+
+/**
+ * Cite the selected note at the cursor.
+ *
+ * `supersedes` gets its own line because it is a claim about the note as a
+ * whole, not about the sentence it happens to sit in; the index reads it from
+ * the line. See DESIGN.md §6.
+ */
+function cite(supersedes) {
+  const hit = hits[selected];
+  if (!hit) return;
+  const link = `[[${hit.name}]]`;
+  if (!supersedes) return replaceTrigger(link);
+
+  const before = editor.value.slice(0, pick.start);
+  const lead = before.length && !before.endsWith("\n") ? "\n" : "";
+  replaceTrigger(`${lead}supersedes: ${link}\n`);
+}
+
+/** Esc leaves the literal trigger behind — it may well have been real text. */
+function cancelPicker() {
+  const caret = pick.end;
+  pick = null;
+  setMode("capture");
+  editor.focus();
+  editor.setSelectionRange(caret, caret);
 }
 
 function queueSearch() {
@@ -242,7 +326,8 @@ function renderResults() {
       li.append(row, snippet);
       li.addEventListener("click", () => {
         selected = i;
-        openSelected();
+        if (pick) cite(false);
+        else openSelected();
       });
       return li;
     })
@@ -283,10 +368,49 @@ async function openSelected() {
 
 /* ── viewer ──────────────────────────────────────────────────────────────── */
 
+/** Follow a `[[link]]` to the note it names. */
+async function openLink(name) {
+  try {
+    showNote(await invoke("open_link", { name }));
+  } catch (e) {
+    setStatus(String(e), "error");
+  }
+}
+
+/**
+ * Rebuild the body with its `[[links]]` as clickable nodes.
+ *
+ * Built as nodes rather than markup because note text must never reach
+ * innerHTML — the same reason `markSnippet` works this way.
+ */
+function linkedBody(body) {
+  const out = [];
+  let at = 0;
+  for (const m of body.matchAll(LINK)) {
+    out.push(document.createTextNode(body.slice(at, m.index)));
+    const a = document.createElement("a");
+    a.className = "link";
+    a.textContent = m[1];
+    a.title = `open ${m[1]}`;
+    // Reachable by Tab, because nothing else in this app needs a mouse.
+    a.tabIndex = 0;
+    a.addEventListener("click", () => openLink(m[1]));
+    a.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      openLink(m[1]);
+    });
+    out.push(a);
+    at = m.index + m[0].length;
+  }
+  out.push(document.createTextNode(body.slice(at)));
+  return out;
+}
+
 function showNote(note) {
-  document.getElementById("viewer-title").textContent = note.title;
+  document.getElementById("viewer-title").replaceChildren(...linkedBody(note.title));
   document.getElementById("viewer-when").textContent = note.when;
-  document.getElementById("viewer-body").textContent = note.body;
+  document.getElementById("viewer-body").replaceChildren(...linkedBody(note.body));
 
   gallery = note.images.map((i) => i.name);
   document
@@ -300,10 +424,18 @@ function showNote(note) {
 /* ── keys ────────────────────────────────────────────────────────────────── */
 
 editor.addEventListener("input", () => {
-  // `//` in an empty buffer is the search trigger, not text.
-  if (editor.value === SEARCH_TRIGGER) {
-    editor.value = "";
-    openSearch();
+  const range = triggerAt(editor.value, editor.selectionStart);
+  if (range) {
+    // Same trigger, two meanings, decided by whether there is a note in
+    // progress: an empty buffer means "find my old notes", anywhere else means
+    // "cite one here".
+    const rest = editor.value.slice(0, range.start) + editor.value.slice(range.end);
+    if (rest.trim() === "") {
+      editor.value = "";
+      openSearch();
+    } else {
+      openPicker(range);
+    }
     return;
   }
   queueDraftSave();
@@ -346,11 +478,13 @@ query.addEventListener("keydown", (e) => {
       break;
     case "Enter":
       e.preventDefault();
-      openSelected();
+      if (pick) cite(e.ctrlKey || e.metaKey);
+      else openSelected();
       break;
     case "Escape":
       e.preventDefault();
-      closeSearch();
+      if (pick) cancelPicker();
+      else closeSearch();
       break;
   }
 });
@@ -372,7 +506,7 @@ document.addEventListener("keydown", (e) => {
 // have it — after the image window closes, or after a click on the frame. The
 // editor is the only thing here worth typing into, so it always takes it back.
 window.addEventListener("focus", () => {
-  if (mode === "search") query.focus();
+  if (mode === "search" || mode === "pick") query.focus();
   else if (mode === "capture") focusEditor();
 });
 

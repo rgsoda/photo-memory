@@ -80,10 +80,18 @@ Validate with `hyprctl reload && hyprctl configerrors`.
 | *(type)* | First non-empty line becomes the title and the filename slug |
 | `Ctrl+V` | Paste an image from the clipboard |
 | `//` | In an empty buffer, switch to search |
+| `//` or `[[` | Mid-note, opens the picker to cite another note |
 | `Ctrl+Enter` | Save and hide |
 | `Esc` | Hide, stashing the text as a draft |
 
 In search: `↑`/`↓` move, `Enter` opens the note read-only, `Esc` goes back.
+
+In the citation picker: `↑`/`↓` move, `Enter` inserts `[[that-note]]` at the cursor,
+`Ctrl+Enter` inserts it as a `supersedes:` line instead, and `Esc` cancels and leaves the
+literal `//` behind. A trigger only fires at the start of a word, so `https://` and a pasted
+`// comment` are ordinary text.
+
+Citations render as links in the read-only view: `Tab` reaches them and `Enter` follows.
 
 In a note: `V` opens its image in its own window, as does clicking any thumbnail. That
 window is always 1600px on its long edge in the image's aspect ratio, so a full-screen
@@ -137,6 +145,8 @@ and every change to the page appears to do nothing.
 
 - No tray icon, so the daemon is stopped with `pkill -x photomem`.
 - Images show in a strip under the editor, not inline in the text.
-- Search has no tag or date filters yet, and no backlinks (M4).
+- Search has no tag or date filters yet.
+- Links can be written and followed, but a note does not yet show what links *to* it, and a
+  superseded note opens with no banner saying so (M4).
 - `photomem --help` opens the window instead of printing help.
-- No links (M4), sync (M5), OCR (M6).
+- No sync (M5), OCR (M6).

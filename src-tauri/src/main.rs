@@ -46,6 +46,7 @@ fn main() {
             commands::thumbnails,
             commands::search,
             commands::open_note,
+            commands::open_link,
             commands::read_image,
             commands::open_image,
             commands::close_image,

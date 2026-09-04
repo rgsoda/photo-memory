@@ -114,6 +114,8 @@ pub fn thumbnails(names: Vec<String>) -> CmdResult<Vec<Pasted>> {
 #[derive(serde::Serialize)]
 pub struct HitView {
     path: String,
+    /// The `[[link]]` target for this note: its filename without `.md`.
+    name: String,
     title: String,
     /// Pre-formatted for display; the UI does no date maths.
     when: String,
@@ -148,6 +150,7 @@ pub fn search(search: State<'_, Search>, query: String) -> CmdResult<Vec<HitView
     Ok(hits
         .into_iter()
         .map(|h| HitView {
+            name: link_name(&h.path),
             path: h.path.display().to_string(),
             title: h.title,
             when: h.created.format("%Y-%m-%d %H:%M").to_string(),
@@ -159,6 +162,8 @@ pub fn search(search: State<'_, Search>, query: String) -> CmdResult<Vec<HitView
 /// A note opened from search results. Read-only by design (see DESIGN.md §6).
 #[derive(serde::Serialize)]
 pub struct NoteView {
+    /// This note's own `[[link]]` target, for the "copy link" affordance.
+    name: String,
     title: String,
     when: String,
     /// Body with the title line removed, since the title is displayed separately.
@@ -174,8 +179,44 @@ pub fn open_note(path: String) -> CmdResult<NoteView> {
     if !path.starts_with(vault.notes_dir()) {
         return Err("that note is not in the vault".into());
     }
+    read_note(&vault, &path)
+}
 
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("{e}"))?;
+/// Open the note a `[[link]]` points at.
+///
+/// Links name a note the way the filename does, so this is a lookup rather than
+/// a search: a link that resolves to nothing is a dangling link, and saying so
+/// is more useful than showing the nearest match.
+#[tauri::command]
+pub fn open_link(name: String) -> CmdResult<NoteView> {
+    let vault = vault()?;
+    let name = safe_link(&name).ok_or_else(|| format!("{name} is not a note name"))?;
+    let path = vault.notes_dir().join(format!("{name}.md"));
+    if !path.is_file() {
+        return Err(format!("no note called {name}"));
+    }
+    read_note(&vault, &path)
+}
+
+/// The `[[link]]` target for a note: its filename without the `.md`.
+fn link_name(path: &std::path::Path) -> String {
+    path.file_stem().unwrap_or_default().to_string_lossy().into_owned()
+}
+
+/// Reject anything that is not a bare note name, so a link cannot walk out of
+/// the notes directory.
+fn safe_link(name: &str) -> Option<&str> {
+    let name = name.trim().trim_end_matches(".md");
+    let bad = name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+        || std::path::Path::new(name).is_absolute();
+    (!bad).then_some(name)
+}
+
+fn read_note(vault: &Vault, path: &std::path::Path) -> CmdResult<NoteView> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{e}"))?;
     let note = Note::parse(&text, chrono::Local::now()).map_err(|e| e.to_string())?;
 
     let images = embedded_names(note.content())
@@ -187,6 +228,7 @@ pub fn open_note(path: String) -> CmdResult<NoteView> {
         .collect();
 
     Ok(NoteView {
+        name: link_name(path),
         title: note.title().to_string(),
         when: note.created.format("%Y-%m-%d %H:%M").to_string(),
         body: without_embed_lines(note.content()),
@@ -227,7 +269,18 @@ fn embedded_names(body: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{embedded_names, without_embed_lines};
+    use super::{embedded_names, safe_link, without_embed_lines};
+
+    #[test]
+    fn link_names_are_bare_and_extensionless() {
+        assert_eq!(safe_link("2026-09-04-1703-deploy"), Some("2026-09-04-1703-deploy"));
+        // Obsidian habits, and our own copy-link affordance, both produce these.
+        assert_eq!(safe_link(" 2026-09-04-1703-deploy.md "), Some("2026-09-04-1703-deploy"));
+        assert_eq!(safe_link("../../etc/passwd"), None);
+        assert_eq!(safe_link("/etc/passwd"), None);
+        assert_eq!(safe_link("sub/note"), None);
+        assert_eq!(safe_link("  "), None);
+    }
 
     #[test]
     fn strips_standalone_embed_lines_only() {
