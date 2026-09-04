@@ -18,7 +18,9 @@ serde.workspace = true
 base64 = "0.22"
 serde_json = "1"
 anyhow.workspace = true
-tauri = { version = "2", features = [] }
+# tray-icon puts photomem in the status bar; image-png is what lets the icon
+# be a PNG rather than raw RGBA typed out at compile time.
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-single-instance = "2"
 
 # Reading an image off the clipboard is the one thing that differs by platform.

@@ -3,6 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod tray;
 
 use tauri::{Emitter, Manager, WebviewWindow};
 
@@ -99,6 +100,12 @@ fn main() {
             #[cfg(target_os = "macos")]
             register_hotkey(app.handle());
 
+            // Not fatal if it fails: a machine with no system tray is a normal
+            // machine, and the hotkey does not go through the tray anyway.
+            if let Err(e) = tray::build(app.handle()) {
+                eprintln!("photomem: no status bar icon: {e}");
+            }
+
             let window = app.get_webview_window("main").expect("main window exists");
             if let Mode::Window = mode {
                 present(&window);
@@ -166,7 +173,7 @@ fn register_hotkey(app: &tauri::AppHandle) {
 ///
 /// Under Hyprland the compositor decides focus, so the window rules in the
 /// README do the real work; these calls are what makes it behave on macOS.
-fn present(window: &WebviewWindow) {
+pub(crate) fn present<R: tauri::Runtime>(window: &WebviewWindow<R>) {
     let _ = window.show();
     let _ = window.center();
     let _ = window.set_focus();

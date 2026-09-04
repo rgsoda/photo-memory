@@ -167,6 +167,24 @@ still opens the window.
 Not packaged yet: no `.app`, no menu bar agent, no LaunchAgent, so the daemon keeps a dock
 icon and is started by hand. That is the rest of M8.
 
+## The status bar icon
+
+photomem lives hidden behind a hotkey, which makes it an app you cannot tell is running,
+cannot reach when you have forgotten the binding, and cannot quit. The tray icon is the
+daemon's entire visible surface: **left click captures**, right click opens a menu with
+*New note* and *Quit photomem*.
+
+On Linux the click does nothing — the StatusNotifierItem hosts reached through
+libappindicator deliver no click events at all — so the menu is the whole interaction
+there, which is why *New note* is in it rather than being click-only. Omarchy's bar keeps
+the tray collapsed behind the `<` chevron on the right; the icon is in there.
+
+The artwork is `src-tauri/icons/tray/photomem.svg`, drawn on a 16-unit grid because 16px is
+the size that has to survive. `render.sh` produces the two PNGs the binary embeds: black
+for macOS, which treats it as a template image and recolours it to match the menu bar, and
+white for Linux, where nothing recolours anything and the icon has to arrive the right
+colour for the bar. Edit the SVG, run the script, commit both.
+
 ## Keys
 
 | Key | Action |
