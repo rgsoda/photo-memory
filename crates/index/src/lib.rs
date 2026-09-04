@@ -53,6 +53,14 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 
 CREATE INDEX IF NOT EXISTS attachments_name ON attachments (name);
+
+CREATE TABLE IF NOT EXISTS tags (
+    from_path TEXT NOT NULL,
+    tag       TEXT NOT NULL,
+    PRIMARY KEY (from_path, tag)
+);
+
+CREATE INDEX IF NOT EXISTS tags_tag ON tags (tag);
 ";
 
 /// Bumped whenever the tables change shape.
@@ -62,7 +70,7 @@ CREATE INDEX IF NOT EXISTS attachments_name ON attachments (name);
 /// recorded mtime and size, `sync` skips them as unchanged, and they would
 /// never acquire the links a newly added table wants — leaving backlinks
 /// silently empty for every note captured before the upgrade.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// An ordinary `[[name]]` mention.
 const KIND_LINK: &str = "link";
@@ -144,7 +152,8 @@ impl Index {
         let found: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap_or(0);
         if found != SCHEMA_VERSION {
             db.execute_batch(
-                "DROP TABLE IF EXISTS attachments;
+                "DROP TABLE IF EXISTS tags;
+                 DROP TABLE IF EXISTS attachments;
                  DROP TABLE IF EXISTS links;
                  DROP TABLE IF EXISTS notes_fts;
                  DROP TABLE IF EXISTS notes;",
@@ -227,6 +236,7 @@ impl Index {
         // a reference must not leave the old backlink behind.
         self.db.execute("DELETE FROM links WHERE from_path = ?1", [path])?;
         self.db.execute("DELETE FROM attachments WHERE from_path = ?1", [path])?;
+        self.db.execute("DELETE FROM tags WHERE from_path = ?1", [path])?;
         self.db.execute(
             "INSERT OR REPLACE INTO notes (path, id, name, title, created, mtime, size)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -261,7 +271,26 @@ impl Index {
         for (i, name) in note.embeds().iter().enumerate() {
             stmt.execute(params![path, name, i as i64])?;
         }
+
+        let mut stmt =
+            self.db.prepare("INSERT OR IGNORE INTO tags (from_path, tag) VALUES (?1, ?2)")?;
+        for tag in note.tags() {
+            stmt.execute(params![path, tag])?;
+        }
         Ok(())
+    }
+
+    /// Every tag in use, most-used first, with how many notes carry it.
+    ///
+    /// Ordered by count rather than alphabetically: a filter list is read
+    /// top-down looking for the tag you reach for most, and a vault of fifty
+    /// tags sorted A-Z buries it.
+    pub fn tags(&self) -> Result<Vec<(String, usize)>> {
+        let mut stmt = self.db.prepare(
+            "SELECT tag, COUNT(*) AS n FROM tags GROUP BY tag ORDER BY n DESC, tag ASC",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as usize)))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
     /// Every captured image, newest note first.
@@ -270,18 +299,24 @@ impl Index {
     /// notes is one thing you would recognise on the wall, and it belongs to
     /// the note you wrote most recently about it. Within a note the pictures
     /// keep the order they were pasted in.
-    pub fn wall(&self, limit: usize) -> Result<Vec<Shot>> {
+    pub fn wall(&self, tag: Option<&str>, limit: usize) -> Result<Vec<Shot>> {
+        // `?2 IS NULL OR …` keeps one query rather than two that must be kept
+        // in step; the filter is applied to the *outer* note only, so a picture
+        // stays attached to the newest note about it whether or not that one
+        // carries the tag.
         let mut stmt = self.db.prepare(
             "SELECT a.name, n.path, n.name, n.title, n.created
              FROM attachments a JOIN notes n ON n.path = a.from_path
              WHERE n.created = (SELECT MAX(n2.created)
                                 FROM attachments a2 JOIN notes n2 ON n2.path = a2.from_path
                                 WHERE a2.name = a.name)
+               AND (?2 IS NULL
+                    OR EXISTS (SELECT 1 FROM tags t WHERE t.from_path = n.path AND t.tag = ?2))
              GROUP BY a.name
              ORDER BY n.created DESC, a.position ASC
              LIMIT ?1",
         )?;
-        let rows = stmt.query_map([limit as i64], |r| {
+        let rows = stmt.query_map(params![limit as i64, tag], |r| {
             let created: String = r.get(4)?;
             Ok(Shot {
                 name: r.get(0)?,
@@ -331,11 +366,14 @@ impl Index {
     /// Unlike `recent`, this is the whole vault rather than a search result, and
     /// it carries no snippet: the timeline is read by date and title, and a
     /// snippet per row would turn a scannable list into a wall of prose.
-    pub fn timeline(&self, limit: usize) -> Result<Vec<Ref>> {
+    pub fn timeline(&self, tag: Option<&str>, limit: usize) -> Result<Vec<Ref>> {
         let mut stmt = self.db.prepare(
-            "SELECT path, name, title, created FROM notes ORDER BY created DESC LIMIT ?1",
+            "SELECT path, name, title, created FROM notes
+             WHERE (?2 IS NULL
+                    OR EXISTS (SELECT 1 FROM tags t WHERE t.from_path = notes.path AND t.tag = ?2))
+             ORDER BY created DESC LIMIT ?1",
         )?;
-        let rows = stmt.query_map([limit as i64], row_to_ref)?;
+        let rows = stmt.query_map(params![limit as i64, tag], row_to_ref)?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
@@ -352,6 +390,7 @@ impl Index {
             self.db.execute("DELETE FROM notes_fts WHERE path = ?1", [path])?;
             self.db.execute("DELETE FROM links WHERE from_path = ?1", [path])?;
             self.db.execute("DELETE FROM attachments WHERE from_path = ?1", [path])?;
+            self.db.execute("DELETE FROM tags WHERE from_path = ?1", [path])?;
             removed += 1;
         }
         Ok(removed)
@@ -754,7 +793,7 @@ mod tests {
         write(&dir, "february", "2026-02-05T10:00:00+01:00", "February\nbody");
         ix.sync(&dir).unwrap();
 
-        assert_eq!(names(ix.timeline(50).unwrap()), ["march", "february", "january"]);
+        assert_eq!(names(ix.timeline(None, 50).unwrap()), ["march", "february", "january"]);
     }
 
     #[test]
@@ -764,7 +803,7 @@ mod tests {
         let (dir, mut ix) = vault_with("timeline-all", &[]);
         write(&dir, "wordless", "2026-01-05T10:00:00+01:00", "?????");
         ix.sync(&dir).unwrap();
-        assert_eq!(ix.timeline(50).unwrap().len(), 1);
+        assert_eq!(ix.timeline(None, 50).unwrap().len(), 1);
     }
 
     #[test]
@@ -775,7 +814,7 @@ mod tests {
         ix.sync(&dir).unwrap();
 
         // Newest note first, and within a note the order they were pasted in.
-        assert_eq!(shot_names(ix.wall(50).unwrap()), ["b.webp", "c.webp", "a.webp"]);
+        assert_eq!(shot_names(ix.wall(None, 50).unwrap()), ["b.webp", "c.webp", "a.webp"]);
     }
 
     #[test]
@@ -784,7 +823,7 @@ mod tests {
         write(&dir, "with-a-picture", "2026-01-05T10:00:00+01:00", "With a picture\n![[shot.webp]]");
         ix.sync(&dir).unwrap();
 
-        let shot = &ix.wall(50).unwrap()[0];
+        let shot = &ix.wall(None, 50).unwrap()[0];
         assert_eq!(shot.name, "shot.webp");
         assert_eq!(shot.note_name, "with-a-picture");
         assert_eq!(shot.title, "With a picture");
@@ -800,7 +839,7 @@ mod tests {
         write(&dir, "again-later", "2026-06-05T10:00:00+01:00", "Again later\n![[shot.webp]]");
         ix.sync(&dir).unwrap();
 
-        let shots = ix.wall(50).unwrap();
+        let shots = ix.wall(None, 50).unwrap();
         assert_eq!(shot_names(shots.clone()), ["shot.webp"]);
         assert_eq!(shots[0].note_name, "again-later");
     }
@@ -810,7 +849,7 @@ mod tests {
         let (dir, mut ix) = vault_with("wall-empty", &[]);
         write(&dir, "prose-only", "2026-01-05T10:00:00+01:00", "Prose only\nSee [[somewhere]].");
         ix.sync(&dir).unwrap();
-        assert!(ix.wall(50).unwrap().is_empty(), "a [[link]] is not a picture");
+        assert!(ix.wall(None, 50).unwrap().is_empty(), "a [[link]] is not a picture");
     }
 
     #[test]
@@ -818,11 +857,57 @@ mod tests {
         let (dir, mut ix) = vault_with("wall-stale", &[]);
         write(&dir, "shots", "2026-01-05T10:00:00+01:00", "Shots\n![[a.webp]]\n![[b.webp]]");
         ix.sync(&dir).unwrap();
-        assert_eq!(ix.wall(50).unwrap().len(), 2);
+        assert_eq!(ix.wall(None, 50).unwrap().len(), 2);
 
         write(&dir, "shots", "2026-01-05T10:00:00+01:00", "Shots\n![[a.webp]] and the other one is gone now");
         assert_eq!(ix.sync(&dir).unwrap().updated, 1);
-        assert_eq!(shot_names(ix.wall(50).unwrap()), ["a.webp"], "a stale picture survived the edit");
+        assert_eq!(shot_names(ix.wall(None, 50).unwrap()), ["a.webp"], "a stale picture survived the edit");
+    }
+
+    #[test]
+    fn tags_are_collected_with_their_counts() {
+        let (dir, mut ix) = vault_with("tags", &[]);
+        write(&dir, "one", "2026-01-05T10:00:00+01:00", "One\nabout #kafka and #ops");
+        write(&dir, "two", "2026-02-05T10:00:00+01:00", "Two\nmore #kafka");
+        ix.sync(&dir).unwrap();
+
+        // Most used first, so the tag you reach for is at the top of the list.
+        assert_eq!(ix.tags().unwrap(), vec![("kafka".into(), 2), ("ops".into(), 1)]);
+    }
+
+    #[test]
+    fn the_timeline_can_be_filtered_to_one_tag() {
+        let (dir, mut ix) = vault_with("tag-timeline", &[]);
+        write(&dir, "tagged", "2026-01-05T10:00:00+01:00", "Tagged\nabout #kafka");
+        write(&dir, "untagged", "2026-02-05T10:00:00+01:00", "Untagged\nprose only");
+        ix.sync(&dir).unwrap();
+
+        assert_eq!(names(ix.timeline(Some("kafka"), 50).unwrap()), ["tagged"]);
+        assert_eq!(ix.timeline(None, 50).unwrap().len(), 2, "no filter means everything");
+        assert!(ix.timeline(Some("nonexistent"), 50).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_wall_can_be_filtered_to_one_tag() {
+        let (dir, mut ix) = vault_with("tag-wall", &[]);
+        write(&dir, "tagged", "2026-01-05T10:00:00+01:00", "Tagged\n#kafka\n![[a.webp]]");
+        write(&dir, "untagged", "2026-02-05T10:00:00+01:00", "Untagged\n![[b.webp]]");
+        ix.sync(&dir).unwrap();
+
+        assert_eq!(shot_names(ix.wall(Some("kafka"), 50).unwrap()), ["a.webp"]);
+        assert_eq!(ix.wall(None, 50).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn editing_a_note_to_drop_a_tag_drops_it_from_the_list() {
+        let (dir, mut ix) = vault_with("tag-stale", &[]);
+        write(&dir, "note", "2026-01-05T10:00:00+01:00", "Note\nabout #kafka");
+        ix.sync(&dir).unwrap();
+        assert_eq!(ix.tags().unwrap().len(), 1);
+
+        write(&dir, "note", "2026-01-05T10:00:00+01:00", "Note\nthe tag is gone from this body");
+        assert_eq!(ix.sync(&dir).unwrap().updated, 1);
+        assert!(ix.tags().unwrap().is_empty(), "a stale tag survived the edit");
     }
 
     #[test]

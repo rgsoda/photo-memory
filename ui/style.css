@@ -141,7 +141,8 @@ kbd {
 #search[hidden],
 #viewer[hidden],
 #wall[hidden],
-#timeline[hidden] {
+#timeline[hidden],
+#tags[hidden] {
   display: none;
 }
 
@@ -276,6 +277,55 @@ kbd {
   margin: 0;
   padding: 12px;
   color: var(--muted);
+}
+
+/* ── the tag filter ─────────────────────────────────────────────────────── */
+
+#tags {
+  flex: 1;
+  min-height: 0;
+  display: block;
+  overflow-y: auto;
+  background: var(--surface);
+}
+
+#tags ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#tags li {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 20px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+}
+
+#tags li[aria-selected="true"] {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+#tags .count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The chip naming the tag a browse view is filtered to. Stated rather than
+   implied: a filtered view that looks like an unfiltered one is a view that
+   quietly lies about how much you have captured. */
+.filter {
+  padding: 6px 20px;
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  color: var(--accent);
+  font-size: 12px;
+}
+
+#wall .filter {
+  grid-column: 1 / -1;
+  margin: -12px -12px 0;
 }
 
 /* ── the timeline ───────────────────────────────────────────────────────── */

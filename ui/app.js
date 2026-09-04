@@ -16,6 +16,7 @@ const panes = {
   viewer: document.getElementById("viewer"),
   wall: document.getElementById("wall"),
   timeline: document.getElementById("timeline"),
+  tags: document.getElementById("tags"),
 };
 
 /** The browse views `Tab` cycles through, search included. */
@@ -42,8 +43,10 @@ const HINTS = {
   capture: "<kbd>Ctrl</kbd><kbd>↵</kbd> save &nbsp; <kbd>//</kbd> search &amp; cite &nbsp; <kbd>Esc</kbd> dismiss",
   search: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>Tab</kbd> browse &nbsp; <kbd>Esc</kbd> back",
   viewer: "<kbd>↑</kbd><kbd>↓</kbd> scroll &nbsp; <kbd>Tab</kbd><kbd>↵</kbd> link &nbsp; <kbd>V</kbd> image &nbsp; <kbd>Esc</kbd> back",
-  wall: "<kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> note &nbsp; <kbd>V</kbd> image &nbsp; <kbd>Tab</kbd> next &nbsp; <kbd>Esc</kbd> back",
-  timeline: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>G</kbd> group &nbsp; <kbd>Tab</kbd> next &nbsp; <kbd>Esc</kbd> back",
+  wall: "<kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> note &nbsp; <kbd>V</kbd> image &nbsp; <kbd>T</kbd> tag &nbsp; <kbd>Tab</kbd> next &nbsp; <kbd>Esc</kbd> back",
+  timeline: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>G</kbd> group &nbsp; <kbd>T</kbd> tag &nbsp; <kbd>Tab</kbd> next &nbsp; <kbd>Esc</kbd> back",
+  tags: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> filter &nbsp; <kbd>Esc</kbd> cancel",
+  pickTag: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> insert tag &nbsp; <kbd>Esc</kbd> keep the #",
   pick: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> cite &nbsp; <kbd>Ctrl</kbd><kbd>↵</kbd> supersedes &nbsp; <kbd>Esc</kbd> cancel",
 };
 
@@ -64,6 +67,13 @@ let shot = 0;
 let entries = [];
 let entry = 0;
 let grouping = "day";
+/** The tag both browse views are filtered to, or null for everything. */
+let filter = null;
+/** The tag list, and where the picker sits in it. */
+let tagList = [];
+let tagAt = 0;
+/** Which view the tag picker was opened from, to return to. */
+let tagFrom = "timeline";
 let draftTimer = null;
 let searchTimer = null;
 let statusTimer = null;
@@ -81,7 +91,7 @@ function setMode(next) {
   // designed: same index, same widget, same keystroke.
   const pane = next === "pick" ? "search" : next;
   for (const [name, el] of Object.entries(panes)) el.hidden = name !== pane;
-  hints.innerHTML = HINTS[next];
+  hints.innerHTML = HINTS[next === "pick" && pick?.kind === "tag" ? "pickTag" : next];
 }
 
 /* ── images ──────────────────────────────────────────────────────────────── */
@@ -236,7 +246,7 @@ async function openWall() {
   setMode("wall");
   panes.wall.replaceChildren();
   try {
-    shots = await invoke("wall");
+    shots = await invoke("wall", { tag: filter });
   } catch (e) {
     shots = [];
     setStatus(String(e), "error");
@@ -250,12 +260,15 @@ function renderWall() {
   if (!shots.length) {
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent = "No pictures captured yet.";
+    empty.textContent = filter
+      ? `No pictures in notes tagged #${filter}.`
+      : "No pictures captured yet.";
     panes.wall.replaceChildren(empty);
     return;
   }
 
   panes.wall.replaceChildren(
+    ...(filter ? [filterChip()] : []),
     ...shots.map((s, i) => {
       const tile = document.createElement("figure");
       tile.setAttribute("aria-selected", String(i === shot));
@@ -280,7 +293,8 @@ function renderWall() {
       return tile;
     })
   );
-  panes.wall.children[shot]?.scrollIntoView({ block: "nearest" });
+  // The chip, when present, is the first child — so tiles are offset by one.
+  panes.wall.children[shot + (filter ? 1 : 0)]?.scrollIntoView({ block: "nearest" });
 }
 
 /**
@@ -290,7 +304,7 @@ function renderWall() {
  * rendered page rather than a constant to keep in step with the CSS.
  */
 function wallColumns() {
-  const tiles = panes.wall.children;
+  const tiles = [...panes.wall.children].filter((el) => el.tagName === "FIGURE");
   if (tiles.length < 2) return 1;
   const top = tiles[0].offsetTop;
   let n = 1;
@@ -315,13 +329,88 @@ async function openShotNote() {
   }
 }
 
+/* ── tags ────────────────────────────────────────────────────────────────── */
+
+/** Fetch the tag list, cached for the picker and the autocomplete alike. */
+async function loadTags() {
+  try {
+    tagList = await invoke("tags");
+  } catch (e) {
+    tagList = [];
+    setStatus(String(e), "error");
+  }
+  return tagList;
+}
+
+/** Open the tag filter over whichever browse view asked for it. */
+async function openTagFilter() {
+  tagFrom = mode;
+  setMode("tags");
+  await loadTags();
+  // "All notes" is first and is what Escape-by-another-name looks like: there
+  // has to be a way out of a filter that does not require remembering one.
+  tagAt = filter ? 1 + tagList.findIndex((t) => t.tag === filter) : 0;
+  if (tagAt < 1) tagAt = 0;
+  renderTagFilter();
+}
+
+function renderTagFilter() {
+  const rows = [{ tag: null, count: null }, ...tagList];
+  panes.tags.querySelector("ul").replaceChildren(
+    ...rows.map((row, i) => {
+      const li = document.createElement("li");
+      li.setAttribute("aria-selected", String(i === tagAt));
+
+      const name = document.createElement("span");
+      name.textContent = row.tag ? `#${row.tag}` : "All notes";
+      const count = document.createElement("span");
+      count.className = "count";
+      count.textContent = row.count === null ? "" : `${row.count}`;
+
+      li.append(name, count);
+      li.addEventListener("click", () => {
+        tagAt = i;
+        applyTagFilter();
+      });
+      return li;
+    })
+  );
+  if (!tagList.length) {
+    const li = document.createElement("li");
+    li.className = "count";
+    li.textContent = "No tags yet — write #like-this in a note.";
+    panes.tags.querySelector("ul").append(li);
+  }
+  panes.tags.children[0].children[tagAt]?.scrollIntoView({ block: "nearest" });
+}
+
+function moveTag(delta) {
+  const count = tagList.length + 1;
+  tagAt = Math.min(Math.max(tagAt + delta, 0), count - 1);
+  renderTagFilter();
+}
+
+function applyTagFilter() {
+  filter = tagAt === 0 ? null : tagList[tagAt - 1].tag;
+  if (tagFrom === "wall") openWall();
+  else openTimeline();
+}
+
+/** The chip that says a view is showing less than everything. */
+function filterChip() {
+  const chip = document.createElement("div");
+  chip.className = "filter";
+  chip.textContent = `#${filter} — T to change, Esc to clear`;
+  return chip;
+}
+
 /* ── the timeline ────────────────────────────────────────────────────────── */
 
 async function openTimeline() {
   setMode("timeline");
   panes.timeline.replaceChildren();
   try {
-    entries = await invoke("timeline");
+    entries = await invoke("timeline", { tag: filter });
   } catch (e) {
     entries = [];
     setStatus(String(e), "error");
@@ -335,12 +424,12 @@ function renderTimeline() {
   if (!entries.length) {
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent = "No notes yet.";
+    empty.textContent = filter ? `No notes tagged #${filter}.` : "No notes yet.";
     panes.timeline.replaceChildren(empty);
     return;
   }
 
-  const out = [];
+  const out = filter ? [filterChip()] : [];
   let list = null;
   let heading = null;
 
@@ -419,18 +508,27 @@ function triggerAt(value, caret) {
     const start = caret - t.length;
     if (start < 0 || value.slice(start, caret) !== t) continue;
     if (start > 0 && !/\s/.test(value[start - 1])) continue;
-    return { start, end: caret };
+    return { start, end: caret, kind: "note" };
+  }
+  // `#` at the start of a word offers the tags already in use, which is the
+  // only thing that keeps a free-form tag from becoming five spellings of
+  // itself. It is not consumed: what is typed stays in the note either way.
+  const start = caret - 1;
+  if (start >= 0 && value[start] === "#" && (start === 0 || /\s/.test(value[start - 1]))) {
+    return { start, end: caret, kind: "tag" };
   }
   return null;
 }
 
 /** Open the picker over the trigger the user just typed. */
-function openPicker(range) {
+async function openPicker(range) {
   pick = range;
   setMode("pick");
-  query.placeholder = "Cite a note…";
+  const tagging = range.kind === "tag";
+  query.placeholder = tagging ? "Tag…" : "Cite a note…";
   query.value = "";
   query.focus();
+  if (tagging) await loadTags();
   runSearch();
 }
 
@@ -457,6 +555,9 @@ function replaceTrigger(text) {
 function cite(supersedes) {
   const hit = hits[selected];
   if (!hit) return;
+  // A tag is text in the sentence, so it takes the trailing space that keeps
+  // typing flowing — a citation is a reference, and gets none.
+  if (pick.kind === "tag") return replaceTrigger(`#${hit.tag} `);
   const link = `[[${hit.name}]]`;
   if (!supersedes) return replaceTrigger(link);
 
@@ -480,11 +581,20 @@ function queueSearch() {
 }
 
 async function runSearch() {
-  try {
-    hits = await invoke("search", { query: query.value });
-  } catch (e) {
-    hits = [];
-    setStatus(String(e), "error");
+  if (pick?.kind === "tag") {
+    // Filtered here rather than in SQL: the whole tag list is small, already
+    // fetched, and a round trip per keystroke would be slower than the typing.
+    const typed = query.value.trim().toLowerCase();
+    hits = tagList
+      .filter((t) => t.tag.includes(typed))
+      .map((t) => ({ tag: t.tag, title: `#${t.tag}`, when: `${t.count}`, snippet: "" }));
+  } else {
+    try {
+      hits = await invoke("search", { query: query.value });
+    } catch (e) {
+      hits = [];
+      setStatus(String(e), "error");
+    }
   }
   selected = 0;
   renderResults();
@@ -705,7 +815,7 @@ editor.addEventListener("input", () => {
     // progress: an empty buffer means "find my old notes", anywhere else means
     // "cite one here".
     const rest = editor.value.slice(0, range.start) + editor.value.slice(range.end);
-    if (rest.trim() === "") {
+    if (range.kind === "note" && rest.trim() === "") {
       editor.value = "";
       openSearch();
     } else {
@@ -780,6 +890,7 @@ document.addEventListener("keydown", (e) => {
 
   if (mode === "wall") return wallKey(e);
   if (mode === "timeline") return timelineKey(e);
+  if (mode === "tags") return tagKey(e);
   if (mode !== "viewer") return;
 
   const step = scrollStep(e);
@@ -827,14 +938,40 @@ function timelineKey(e) {
     case "g":
       e.preventDefault();
       return cycleGrouping();
+    case "t":
+      e.preventDefault();
+      return openTagFilter();
     case "Tab":
       e.preventDefault();
       return nextView();
     case "Escape":
       e.preventDefault();
+      // Clear the filter first, leave second: Escape should undo the most
+      // recent narrowing, not skip past it.
+      if (filter) {
+        filter = null;
+        return openTimeline();
+      }
       setMode("search");
       query.focus();
       return;
+  }
+}
+
+function tagKey(e) {
+  switch (e.key) {
+    case "ArrowDown":
+      e.preventDefault();
+      return moveTag(1);
+    case "ArrowUp":
+      e.preventDefault();
+      return moveTag(-1);
+    case "Enter":
+      e.preventDefault();
+      return applyTagFilter();
+    case "Escape":
+      e.preventDefault();
+      return tagFrom === "wall" ? openWall() : openTimeline();
   }
 }
 
@@ -857,11 +994,18 @@ function wallKey(e) {
       // captured is the obvious thing to want.
       if (shots.length) openImage(shots[shot].name, shots.map((s) => s.name));
       return;
+    case "t":
+      e.preventDefault();
+      return openTagFilter();
     case "Tab":
       e.preventDefault();
       return nextView();
     case "Escape":
       e.preventDefault();
+      if (filter) {
+        filter = null;
+        return openWall();
+      }
       setMode("search");
       query.focus();
       return;

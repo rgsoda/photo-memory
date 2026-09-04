@@ -119,6 +119,11 @@ impl Note {
     /// produces the first, a note written by hand may carry the second, and a
     /// correction that went unnoticed because it used the other form would
     /// defeat the whole point of making supersession a typed link.
+    /// The `#tags` written in this note.
+    pub fn tags(&self) -> Vec<String> {
+        crate::tags::tags(&self.body)
+    }
+
     /// Attachments this note embeds, in the order they appear.
     pub fn embeds(&self) -> Vec<String> {
         crate::links::embeds(&self.body)

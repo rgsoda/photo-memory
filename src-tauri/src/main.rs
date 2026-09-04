@@ -86,6 +86,7 @@ fn main() {
             commands::search,
             commands::wall,
             commands::timeline,
+            commands::tags,
             commands::open_note,
             commands::open_link,
             commands::read_image,

@@ -4,7 +4,7 @@ Fast visual note capture. Hotkey, type, save, gone.
 
 See [DESIGN.md](DESIGN.md) for the format and the plan. Working today: capture, clipboard
 images, full-text search, the read-only viewer, citations between notes, git sync, and the
-thumbnail wall and timeline — on Linux and macOS both. Not yet: OCR and a packaged macOS build.
+thumbnail wall, timeline and tags — on Linux and macOS both. Not yet: OCR and a packaged macOS build.
 
 ## Install
 
@@ -127,6 +127,7 @@ icon and is started by hand. That is the rest of M8.
 | `Ctrl+V` | Paste an image from the clipboard |
 | `//` | In an empty buffer, switch to search |
 | `//` or `[[` | Mid-note, opens the picker to cite another note |
+| `#` | At the start of a word, completes from the tags already in use |
 | `Ctrl+Enter` | Save and hide |
 | `Esc` | Hide, stashing the text as a draft |
 
@@ -139,6 +140,9 @@ dimensions, `Enter` opens the note the picture belongs to, `V` opens the picture
 
 On the **timeline** — every note by date: `↑`/`↓` and `PageUp`/`PageDown` move, `Enter`
 opens, and `G` cycles the grouping between day, week and month without losing your place.
+
+`T` filters either view to one tag, and the filter follows you between them. `Esc` clears
+the filter first and leaves the view second.
 
 `Esc` returns to search from either.
 
@@ -211,6 +215,6 @@ and every change to the page appears to do nothing.
 - Search has no tag or date filters yet.
 - On macOS the app runs but is not packaged: no `.app` bundle, menu bar agent or
   LaunchAgent, and `install.sh` is Linux-only (M8).
-- Neither browse view filters by tag: nothing parses `#tags` yet, so there is nothing to
-  filter on (M7 wanted this; it needs tags first).
+- Tags are inline text, so `#ff0000` in a note about CSS becomes a tag. `#1234` and
+  `# heading` do not.
 - No OCR (M6).

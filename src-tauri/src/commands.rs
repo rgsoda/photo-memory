@@ -201,12 +201,12 @@ pub struct TimelineItem {
 }
 
 #[tauri::command]
-pub fn timeline(search: State<'_, Search>) -> CmdResult<Vec<TimelineItem>> {
+pub fn timeline(search: State<'_, Search>, tag: Option<String>) -> CmdResult<Vec<TimelineItem>> {
     const LIMIT: usize = 2000;
 
     let index = search.0.lock().map_err(|_| "index is poisoned".to_string())?;
     Ok(index
-        .timeline(LIMIT)
+        .timeline(tag.as_deref(), LIMIT)
         .map_err(|e| format!("{e:#}"))?
         .into_iter()
         .map(|note| {
@@ -223,6 +223,25 @@ pub fn timeline(search: State<'_, Search>) -> CmdResult<Vec<TimelineItem>> {
                 month: note.created.format("%B %Y").to_string(),
             }
         })
+        .collect())
+}
+
+/// A tag and how many notes carry it.
+#[derive(serde::Serialize)]
+pub struct TagCount {
+    tag: String,
+    count: usize,
+}
+
+/// Every tag in use, most-used first.
+#[tauri::command]
+pub fn tags(search: State<'_, Search>) -> CmdResult<Vec<TagCount>> {
+    let index = search.0.lock().map_err(|_| "index is poisoned".to_string())?;
+    Ok(index
+        .tags()
+        .map_err(|e| format!("{e:#}"))?
+        .into_iter()
+        .map(|(tag, count)| TagCount { tag, count })
         .collect())
 }
 
@@ -244,13 +263,13 @@ pub struct WallItem {
 /// placeholders is nothing to recognise. In the note itself a missing embed is
 /// still shown, because there the filename is the information.
 #[tauri::command]
-pub fn wall(search: State<'_, Search>) -> CmdResult<Vec<WallItem>> {
+pub fn wall(search: State<'_, Search>, tag: Option<String>) -> CmdResult<Vec<WallItem>> {
     const LIMIT: usize = 500;
 
     let vault = vault()?;
     let index = search.0.lock().map_err(|_| "index is poisoned".to_string())?;
     Ok(index
-        .wall(LIMIT)
+        .wall(tag.as_deref(), LIMIT)
         .map_err(|e| format!("{e:#}"))?
         .into_iter()
         .filter_map(|shot| {

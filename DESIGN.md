@@ -444,13 +444,23 @@ guess.
 
 **M6 — OCR.** tesseract on paste, OCR text into the index. *The differentiator.*
 
-**M7 — Browsing.** Timeline grouping and the thumbnail wall. Both done, except filtering by
-tag: nothing parses `#tags` yet, so there is nothing to filter on.
+**M7 — Browsing.** Timeline grouping and the thumbnail wall, both filterable by tag. Done.
 `Tab` cycles search → wall → timeline → search, one key for all of it. The three group
 labels (day, week, month) are computed in Rust and sent with every row, so switching
 grouping is a repaint with no round trip and the page still does no date maths — ISO weeks
 in particular are the sort of thing a hand-rolled version gets wrong only at the turn of the
 year, which is the worst time to find out.
+
+**Tags are inline text, not a field.** They are typed mid-sentence and stay in the note,
+because anything that demands a separate field is something you stop doing on the third day.
+The whole difficulty is that `#` is ordinary punctuation: a URL fragment, a markdown
+heading, an issue number and a CSS colour all contain one. The rules are deliberately narrow
+— a tag must start a word, must begin with a letter, and loses its trailing punctuation —
+because a false negative costs one tag typed differently, while a false positive sits in the
+filter list forever. `#ff0000` is the case that gets through, and it is worth the trade.
+Tags fold to lower case so `#Kafka` and `#kafka` are one tag; `#` in the editor completes
+from the tags already in use, which is what keeps a free-form vocabulary from becoming five
+spellings of the same idea.
 The index grew an `attachments` table, populated from `![[name]]` exactly as `links` is from
 `[[name]]` — schema version 2, so an existing index is thrown away and rebuilt rather than
 left with an empty table it would never fill. One row per *picture*, not per embed: the same
