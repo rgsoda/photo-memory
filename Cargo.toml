@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/config", "crates/store", "src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+photomem-core = { path = "crates/core" }
+photomem-config = { path = "crates/config" }
+photomem-store = { path = "crates/store" }
+anyhow = "1"
+chrono = "0.4"
+serde = { version = "1", features = ["derive"] }

@@ -1,0 +1,15 @@
+[package]
+name = "photomem"
+version.workspace = true
+edition.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+photomem-core.workspace = true
+photomem-config.workspace = true
+photomem-store.workspace = true
+anyhow.workspace = true
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"

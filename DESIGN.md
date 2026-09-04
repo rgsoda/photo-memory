@@ -316,6 +316,7 @@ autostart differ, and each is a small platform module behind one trait.
 photo-memory/
   crates/
     core/         # note parsing, frontmatter, links, tags, slugs. No I/O.
+    config/       # ~/.config/photomem/config.toml
     store/        # file read/write, atomic saves, drafts, watcher
     index/        # SQLite + FTS5, search queries, backlinks, groupings
     images/       # clipboard decode, downscale, WebP encode, thumbs, OCR
@@ -323,7 +324,8 @@ photo-memory/
     platform/     # trait + linux/ and macos/ impls: hotkey, clipboard, autostart
     daemon/       # socket server, wires everything, owns the window
   src-tauri/      # Tauri shell, commands, tray
-  ui/             # frontend: editor, search, timeline, thumbnail wall
+  ui/             # frontend: editor, search, timeline, thumbnail wall — plain
+                  # HTML/CSS/JS, deliberately no bundler and no npm in the build
   DESIGN.md
 ```
 

@@ -1,0 +1,8 @@
+[package]
+name = "photomem-store"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+photomem-core.workspace = true
+anyhow.workspace = true
