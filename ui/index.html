@@ -26,12 +26,19 @@
 
       <!-- Viewer: read-only. Notes are never edited here; see DESIGN.md §6. -->
       <section id="viewer" hidden>
+        <!-- Above the title, because the one failure mode of never editing a
+             note is reading it without learning it was later corrected. -->
+        <div id="viewer-superseded" hidden></div>
         <header>
           <h1 id="viewer-title"></h1>
           <time id="viewer-when"></time>
         </header>
         <pre id="viewer-body"></pre>
         <div id="viewer-images"></div>
+        <div id="viewer-backlinks" hidden>
+          <h2>Linked from</h2>
+          <ul></ul>
+        </div>
       </section>
 
       <footer>

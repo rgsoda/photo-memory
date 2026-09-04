@@ -20,11 +20,14 @@ const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS notes (
     path    TEXT PRIMARY KEY,
     id      TEXT NOT NULL,
+    name    TEXT NOT NULL,
     title   TEXT NOT NULL,
     created TEXT NOT NULL,
     mtime   INTEGER NOT NULL,
     size    INTEGER NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS notes_name ON notes (name);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
     path UNINDEXED,
@@ -32,7 +35,30 @@ CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
     body,
     tokenize='unicode61 remove_diacritics 2'
 );
+
+CREATE TABLE IF NOT EXISTS links (
+    from_path TEXT NOT NULL,
+    target    TEXT NOT NULL,
+    kind      TEXT NOT NULL,
+    PRIMARY KEY (from_path, target, kind)
+);
+
+CREATE INDEX IF NOT EXISTS links_target ON links (target);
 ";
+
+/// Bumped whenever the tables change shape.
+///
+/// The index is derived state, so a schema change is handled by throwing it
+/// away rather than migrating. Without this, notes already indexed keep their
+/// recorded mtime and size, `sync` skips them as unchanged, and they would
+/// never acquire the links a newly added table wants — leaving backlinks
+/// silently empty for every note captured before the upgrade.
+const SCHEMA_VERSION: i64 = 1;
+
+/// An ordinary `[[name]]` mention.
+const KIND_LINK: &str = "link";
+/// A `supersedes:` declaration, which the viewer raises as a banner.
+const KIND_SUPERSEDES: &str = "supersedes";
 
 /// How much a fresh note may improve its own relevance score. Deliberately
 /// small: recency breaks ties between comparable matches, it does not decide
@@ -47,6 +73,16 @@ pub struct Hit {
     /// Matching text with the hit marked by `»…«`, or the opening of the note
     /// when there is no query to match.
     pub snippet: String,
+}
+
+/// Another note pointing at this one: a backlink, or the note that supersedes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ref {
+    pub path: PathBuf,
+    /// This note's `[[link]]` target: its filename without the `.md`.
+    pub name: String,
+    pub title: String,
+    pub created: DateTime<Local>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -83,7 +119,17 @@ impl Index {
         // Notes are written rarely and read on every keystroke; WAL keeps a
         // save from blocking the search that is running as you type.
         db.pragma_update(None, "journal_mode", "WAL").ok();
+
+        let found: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap_or(0);
+        if found != SCHEMA_VERSION {
+            db.execute_batch(
+                "DROP TABLE IF EXISTS links;
+                 DROP TABLE IF EXISTS notes_fts;
+                 DROP TABLE IF EXISTS notes;",
+            )?;
+        }
         db.execute_batch(SCHEMA)?;
+        db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(Index { db })
     }
 
@@ -155,16 +201,67 @@ impl Index {
 
     fn put(&self, path: &str, note: &Note, mtime: i64, size: i64) -> Result<()> {
         self.db.execute("DELETE FROM notes_fts WHERE path = ?1", [path])?;
+        // Links are rewritten wholesale rather than diffed: a note edited to drop
+        // a reference must not leave the old backlink behind.
+        self.db.execute("DELETE FROM links WHERE from_path = ?1", [path])?;
         self.db.execute(
-            "INSERT OR REPLACE INTO notes (path, id, title, created, mtime, size)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![path, note.id, note.title(), note.created.to_rfc3339(), mtime, size],
+            "INSERT OR REPLACE INTO notes (path, id, name, title, created, mtime, size)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                path,
+                note.id,
+                link_name(path),
+                note.title(),
+                note.created.to_rfc3339(),
+                mtime,
+                size
+            ],
         )?;
         self.db.execute(
             "INSERT INTO notes_fts (path, title, body) VALUES (?1, ?2, ?3)",
             params![path, note.title(), note.content()],
         )?;
+
+        let mut stmt = self
+            .db
+            .prepare("INSERT OR IGNORE INTO links (from_path, target, kind) VALUES (?1, ?2, ?3)")?;
+        for target in note.links() {
+            stmt.execute(params![path, target, KIND_LINK])?;
+        }
+        for target in note.supersedes() {
+            stmt.execute(params![path, target, KIND_SUPERSEDES])?;
+        }
         Ok(())
+    }
+
+    /// Notes that reference `name`, newest first.
+    ///
+    /// This is the `links` table read backwards, which is all a backlink is —
+    /// hence the index on `target` rather than only on `from_path`.
+    pub fn backlinks(&self, name: &str) -> Result<Vec<Ref>> {
+        let mut stmt = self.db.prepare(
+            "SELECT DISTINCT n.path, n.name, n.title, n.created
+             FROM links l JOIN notes n ON n.path = l.from_path
+             WHERE l.target = ?1 AND n.name <> ?1
+             ORDER BY n.created DESC",
+        )?;
+        let rows = stmt.query_map([name], row_to_ref)?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// The newest note declaring that it supersedes `name`, if any.
+    ///
+    /// Newest wins when several do: the banner says what is currently believed,
+    /// and the rest stay reachable in the backlink list rather than vanishing.
+    pub fn superseded_by(&self, name: &str) -> Result<Option<Ref>> {
+        let mut stmt = self.db.prepare(
+            "SELECT n.path, n.name, n.title, n.created
+             FROM links l JOIN notes n ON n.path = l.from_path
+             WHERE l.target = ?1 AND l.kind = ?2 AND n.name <> ?1
+             ORDER BY n.created DESC LIMIT 1",
+        )?;
+        let mut rows = stmt.query_map(params![name, KIND_SUPERSEDES], row_to_ref)?;
+        rows.next().transpose().map_err(Into::into)
     }
 
     fn remove_missing(&self, seen: &[String]) -> Result<usize> {
@@ -178,6 +275,7 @@ impl Index {
         for path in existing.iter().filter(|p| !seen.contains(p)) {
             self.db.execute("DELETE FROM notes WHERE path = ?1", [path])?;
             self.db.execute("DELETE FROM notes_fts WHERE path = ?1", [path])?;
+            self.db.execute("DELETE FROM links WHERE from_path = ?1", [path])?;
             removed += 1;
         }
         Ok(removed)
@@ -252,6 +350,23 @@ impl Index {
     }
 }
 
+/// The `[[link]]` target for a note: its filename without the `.md`.
+fn link_name(path: &str) -> String {
+    Path::new(path).file_stem().unwrap_or_default().to_string_lossy().into_owned()
+}
+
+fn row_to_ref(r: &rusqlite::Row<'_>) -> rusqlite::Result<Ref> {
+    let created: String = r.get(3)?;
+    Ok(Ref {
+        path: PathBuf::from(r.get::<_, String>(0)?),
+        name: r.get(1)?,
+        title: r.get(2)?,
+        created: DateTime::parse_from_rfc3339(&created)
+            .map(|t| t.with_timezone(&Local))
+            .unwrap_or_else(|_| Local::now()),
+    })
+}
+
 fn row_to_hit(r: &rusqlite::Row<'_>) -> rusqlite::Result<Hit> {
     let created: String = r.get(2)?;
     Ok(Hit {
@@ -268,12 +383,12 @@ fn row_to_hit(r: &rusqlite::Row<'_>) -> rusqlite::Result<Hit> {
 mod tests {
     use super::*;
 
-    fn vault_with(notes: &[&str]) -> (PathBuf, Index) {
-        let dir = std::env::temp_dir().join(format!(
-            "photomem-idx-{}-{}",
-            std::process::id(),
-            notes.len() * 100 + notes.first().map_or(0, |n| n.len())
-        ));
+    /// Named rather than derived from the notes, so that two tests building
+    /// similar vaults cannot land in one directory and clear it under each
+    /// other while the suite runs in parallel.
+    fn vault_with(name: &str, notes: &[&str]) -> (PathBuf, Index) {
+        let dir = std::env::temp_dir()
+            .join(format!("photomem-idx-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for (i, body) in notes.iter().enumerate() {
@@ -287,7 +402,7 @@ mod tests {
 
     #[test]
     fn finds_a_note_by_a_word_in_its_body() {
-        let (_d, ix) = vault_with(&["Kafka rebalance\n\nconsumers were evicted", "Tiling window gaps"]);
+        let (_d, ix) = vault_with("by-word", &["Kafka rebalance\n\nconsumers were evicted", "Tiling window gaps"]);
         let hits = ix.search("evicted", 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].title, "Kafka rebalance");
@@ -296,7 +411,7 @@ mod tests {
 
     #[test]
     fn matches_prefixes_so_results_appear_while_typing() {
-        let (_d, ix) = vault_with(&["Kafka rebalance storm\n\nbody"]);
+        let (_d, ix) = vault_with("prefixes", &["Kafka rebalance storm\n\nbody"]);
         for typed in ["k", "kaf", "kafka reb"] {
             assert_eq!(ix.search(typed, 10).unwrap().len(), 1, "typing {typed:?} found nothing");
         }
@@ -304,7 +419,7 @@ mod tests {
 
     #[test]
     fn folds_polish_diacritics_so_accents_can_be_skipped_while_typing() {
-        let (_d, ix) = vault_with(&["Zażółć gęślą jaźń\n\nnotatka"]);
+        let (_d, ix) = vault_with("folds", &["Zażółć gęślą jaźń\n\nnotatka"]);
         assert_eq!(ix.search("gesla", 10).unwrap().len(), 1);
         assert_eq!(ix.search("jazn", 10).unwrap().len(), 1);
         assert_eq!(ix.search("gęślą", 10).unwrap().len(), 1);
@@ -316,14 +431,14 @@ mod tests {
         // ę, ń, ó, ś, ż and ź it survives `remove_diacritics`. Typing the word
         // with its ł works; typing a plain `l` in its place does not. Pinned here
         // so the day it starts mattering, the fix is a deliberate one.
-        let (_d, ix) = vault_with(&["Zażółć gęślą jaźń\n\nnotatka"]);
+        let (_d, ix) = vault_with("stroked-l", &["Zażółć gęślą jaźń\n\nnotatka"]);
         assert_eq!(ix.search("zazołc", 10).unwrap().len(), 1);
         assert!(ix.search("zazolc", 10).unwrap().is_empty());
     }
 
     #[test]
     fn an_empty_query_lists_recent_notes_newest_first() {
-        let (_d, ix) = vault_with(&["First note", "Second note", "Third note"]);
+        let (_d, ix) = vault_with("recent", &["First note", "Second note", "Third note"]);
         let hits = ix.search("   ", 10).unwrap();
         assert_eq!(hits.len(), 3);
         assert!(hits[0].created >= hits[1].created);
@@ -331,7 +446,7 @@ mod tests {
 
     #[test]
     fn title_matches_outrank_body_mentions() {
-        let (_d, ix) = vault_with(&[
+        let (_d, ix) = vault_with("title-rank", &[
             "Something unrelated\n\nthis mentions kafka once in passing",
             "Kafka rebalance\n\nnotes about the incident",
         ]);
@@ -343,7 +458,7 @@ mod tests {
     fn a_title_match_wins_even_when_an_older_note_is_the_one_titled() {
         // The recency boost must not be strong enough to promote a passing
         // mention over the note that is actually about the thing.
-        let (dir, mut ix) = vault_with(&[]);
+        let (dir, mut ix) = vault_with("older-title", &[]);
         std::fs::write(
             dir.join("2026-03-11-0902-kafka-poll-tuning.md"),
             "---\ncreated: \"2026-03-11T09:02:00+01:00\"\n---\nKafka poll tuning\nBumped max.poll.records to 200.\n",
@@ -362,7 +477,7 @@ mod tests {
 
     #[test]
     fn recency_breaks_ties_between_equally_good_matches() {
-        let (dir, mut ix) = vault_with(&[]);
+        let (dir, mut ix) = vault_with("recency", &[]);
         for (day, id) in [("2026-01-05", "older"), ("2026-08-05", "newer")] {
             std::fs::write(
                 dir.join(format!("{day}-1000-{id}.md")),
@@ -379,14 +494,14 @@ mod tests {
 
     #[test]
     fn snippets_do_not_repeat_the_title() {
-        let (_d, ix) = vault_with(&["Kafka rebalance\n\nconsumers were evicted"]);
+        let (_d, ix) = vault_with("snippets", &["Kafka rebalance\n\nconsumers were evicted"]);
         let snippet = &ix.search("evicted", 10).unwrap()[0].snippet;
         assert!(!snippet.contains("Kafka rebalance"), "snippet repeated the title: {snippet}");
     }
 
     #[test]
     fn sync_tracks_additions_edits_and_deletions() {
-        let (dir, mut ix) = vault_with(&["First note", "Second note"]);
+        let (dir, mut ix) = vault_with("sync", &["First note", "Second note"]);
         assert_eq!(ix.len(), 2);
 
         // Re-syncing an unchanged directory must do nothing at all.
@@ -410,7 +525,7 @@ mod tests {
 
     #[test]
     fn skips_files_that_are_not_notes() {
-        let (dir, mut ix) = vault_with(&["Real note"]);
+        let (dir, mut ix) = vault_with("not-notes", &["Real note"]);
         std::fs::write(dir.join("empty.md"), "   \n\n").unwrap();
         std::fs::write(dir.join("notes.txt"), "not markdown").unwrap();
 
@@ -423,5 +538,155 @@ mod tests {
         let mut ix = Index::in_memory().unwrap();
         assert!(ix.sync(Path::new("/nonexistent/photomem/notes")).is_ok());
         assert!(ix.is_empty());
+    }
+
+    /// A note at a known filename, so that another note's `[[link]]` can name it.
+    /// The helper above slugs its own filenames, which link targets cannot guess.
+    fn write(dir: &Path, name: &str, created: &str, body: &str) {
+        std::fs::write(
+            dir.join(format!("{name}.md")),
+            format!("---\ncreated: \"{created}\"\n---\n{body}\n"),
+        )
+        .unwrap();
+    }
+
+    fn names(refs: Vec<Ref>) -> Vec<String> {
+        refs.into_iter().map(|r| r.name).collect()
+    }
+
+    #[test]
+    fn backlinks_are_the_links_table_read_backwards() {
+        let (dir, mut ix) = vault_with("backlinks", &[]);
+        write(&dir, "kafka-rebalance", "2026-01-05T10:00:00+01:00", "Kafka rebalance\nthe original");
+        write(&dir, "flink-timeouts", "2026-02-05T10:00:00+01:00", "Flink timeouts\nSame shape as [[kafka-rebalance]].");
+        write(&dir, "poll-tuning", "2026-03-05T10:00:00+01:00", "Poll tuning\nFollows [[kafka-rebalance]].");
+        ix.sync(&dir).unwrap();
+
+        // Newest first, and it is the *linking* note that a backlink names.
+        assert_eq!(names(ix.backlinks("kafka-rebalance").unwrap()), ["poll-tuning", "flink-timeouts"]);
+        assert!(ix.backlinks("poll-tuning").unwrap().is_empty(), "links are not symmetric");
+    }
+
+    #[test]
+    fn an_embedded_image_is_not_a_backlink() {
+        // `![[shot.webp]]` is an attachment. Counting it would give every pasted
+        // screenshot a phantom note pointing at it.
+        let (dir, mut ix) = vault_with("embed-backlink", &[]);
+        write(&dir, "with-a-picture", "2026-01-05T10:00:00+01:00", "With a picture\n![[2026-01-05-abc123.webp]]");
+        ix.sync(&dir).unwrap();
+        assert!(ix.backlinks("2026-01-05-abc123.webp").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_note_that_links_to_itself_is_not_its_own_backlink() {
+        let (dir, mut ix) = vault_with("self-link", &[]);
+        write(&dir, "recursive", "2026-01-01T10:00:00+01:00", "Recursive\nSee [[recursive]].");
+        ix.sync(&dir).unwrap();
+        assert!(ix.backlinks("recursive").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_supersession_is_found_from_the_note_it_corrects() {
+        let (dir, mut ix) = vault_with("supersede", &[]);
+        write(&dir, "poll-tuning", "2026-03-11T09:02:00+01:00", "Kafka poll tuning\nBumped max.poll.records.");
+        write(&dir, "rebalance-storm", "2026-09-04T16:52:00+02:00", "Kafka rebalance storm\nsupersedes: [[poll-tuning]]");
+        ix.sync(&dir).unwrap();
+
+        let by = ix.superseded_by("poll-tuning").unwrap().expect("the correcting note");
+        assert_eq!(by.name, "rebalance-storm");
+        assert_eq!(by.title, "Kafka rebalance storm");
+        // The relationship lives in the new note and points one way only.
+        assert!(ix.superseded_by("rebalance-storm").unwrap().is_none());
+    }
+
+    #[test]
+    fn the_frontmatter_form_of_supersedes_counts_too() {
+        // DESIGN.md §2 documents it in frontmatter; the picker writes a body
+        // line. A correction must not go quiet for having used the other one.
+        let (dir, mut ix) = vault_with("supersede-fm", &[]);
+        write(&dir, "original", "2026-01-01T10:00:00+01:00", "Original\ntext");
+        std::fs::write(
+            dir.join("correction.md"),
+            "---\ncreated: \"2026-02-01T10:00:00+01:00\"\nsupersedes: \"[[original]]\"\n---\nCorrection\n",
+        )
+        .unwrap();
+        ix.sync(&dir).unwrap();
+
+        assert_eq!(ix.superseded_by("original").unwrap().unwrap().name, "correction");
+    }
+
+    #[test]
+    fn the_newest_correction_is_the_one_the_banner_names() {
+        let (dir, mut ix) = vault_with("newest-correction", &[]);
+        write(&dir, "original", "2026-01-01T10:00:00+01:00", "Original\nwhat I believed");
+        write(&dir, "first-fix", "2026-02-01T10:00:00+01:00", "First fix\nsupersedes: [[original]]");
+        write(&dir, "second-fix", "2026-03-01T10:00:00+01:00", "Second fix\nsupersedes: [[original]]");
+        ix.sync(&dir).unwrap();
+
+        assert_eq!(ix.superseded_by("original").unwrap().unwrap().name, "second-fix");
+        // The correction the banner does not name must stay reachable, or the
+        // append-only record would be hiding one of its own entries.
+        assert!(names(ix.backlinks("original").unwrap()).contains(&"first-fix".to_string()));
+    }
+
+    #[test]
+    fn an_ordinary_mention_is_not_a_supersession() {
+        let (dir, mut ix) = vault_with("mention-only", &[]);
+        write(&dir, "original", "2026-01-01T10:00:00+01:00", "Original\ntext");
+        write(&dir, "mentions", "2026-02-01T10:00:00+01:00", "Mentions\nSee [[original]].");
+        ix.sync(&dir).unwrap();
+
+        assert!(ix.superseded_by("original").unwrap().is_none());
+        assert_eq!(names(ix.backlinks("original").unwrap()), ["mentions"]);
+    }
+
+    #[test]
+    fn editing_a_note_to_drop_a_link_drops_the_backlink() {
+        let (dir, mut ix) = vault_with("drop-link", &[]);
+        write(&dir, "target", "2026-01-01T10:00:00+01:00", "Target\ntext");
+        write(&dir, "source", "2026-02-01T10:00:00+01:00", "Source\nSee [[target]].");
+        ix.sync(&dir).unwrap();
+        assert_eq!(ix.backlinks("target").unwrap().len(), 1);
+
+        write(&dir, "source", "2026-02-01T10:00:00+01:00", "Source\nthe reference is gone from this rewritten body");
+        assert_eq!(ix.sync(&dir).unwrap().updated, 1);
+        assert!(ix.backlinks("target").unwrap().is_empty(), "a stale backlink survived the edit");
+    }
+
+    #[test]
+    fn a_deleted_note_takes_its_links_with_it() {
+        let (dir, mut ix) = vault_with("delete-link", &[]);
+        write(&dir, "target", "2026-01-01T10:00:00+01:00", "Target\ntext");
+        write(&dir, "source", "2026-02-01T10:00:00+01:00", "Source\nSee [[target]].");
+        ix.sync(&dir).unwrap();
+        assert_eq!(ix.backlinks("target").unwrap().len(), 1);
+
+        std::fs::remove_file(dir.join("source.md")).unwrap();
+        assert_eq!(ix.sync(&dir).unwrap().removed, 1);
+        assert!(ix.backlinks("target").unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_index_from_an_older_schema_is_thrown_away_and_rebuilt() {
+        let (dir, _) = vault_with("older-schema", &[]);
+        write(&dir, "target", "2026-01-01T10:00:00+01:00", "Target\ntext");
+        write(&dir, "source", "2026-02-01T10:00:00+01:00", "Source\nSee [[target]].");
+        let db = dir.join("index.db");
+
+        {
+            let mut ix = Index::open(&db).unwrap();
+            ix.sync(&dir).unwrap();
+            // Rewind it to look like a file written before `links` existed.
+            ix.db.execute_batch("DROP TABLE links;").unwrap();
+            ix.db.pragma_update(None, "user_version", 0i64).unwrap();
+        }
+
+        // Reopening must rebuild. The notes themselves are unchanged on disk, so
+        // without the version check `sync` would skip them as already indexed and
+        // every note captured before the upgrade would have no backlinks at all.
+        let mut ix = Index::open(&db).unwrap();
+        assert!(ix.is_empty(), "the stale index should have been dropped");
+        ix.sync(&dir).unwrap();
+        assert_eq!(names(ix.backlinks("target").unwrap()), ["source"]);
     }
 }

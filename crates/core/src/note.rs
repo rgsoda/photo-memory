@@ -107,6 +107,30 @@ impl Note {
         format!("{}-{}.md", self.created.format("%Y-%m-%d-%H%M"), slugify(self.title()))
     }
 
+    /// Notes this one mentions with `[[name]]`.
+    pub fn links(&self) -> Vec<String> {
+        crate::links::links(&self.body)
+    }
+
+    /// Notes this one declares itself to supersede.
+    ///
+    /// Read from a `supersedes:` body line, which is what the picker writes, and
+    /// from the frontmatter key DESIGN.md §2 documents. Both are real: the app
+    /// produces the first, a note written by hand may carry the second, and a
+    /// correction that went unnoticed because it used the other form would
+    /// defeat the whole point of making supersession a typed link.
+    pub fn supersedes(&self) -> Vec<String> {
+        let mut out = crate::links::supersedes(&self.body);
+        if let Some(declared) = self.extra.get("supersedes") {
+            for name in crate::links::targets(declared) {
+                if !out.contains(&name) {
+                    out.push(name);
+                }
+            }
+        }
+        out
+    }
+
     pub fn render(&self) -> String {
         let mut fm = Frontmatter::new();
         fm.set("id", &self.id);
@@ -203,6 +227,29 @@ mod tests {
         assert_eq!(n.title(), "Just a note I typed in vim");
         assert_eq!(n.created, fallback);
         assert!(n.id.is_empty());
+    }
+
+    #[test]
+    fn reads_supersedes_from_either_the_body_or_the_frontmatter() {
+        let from_body = Note::new("New finding\nsupersedes: [[old-note]]").unwrap();
+        assert_eq!(from_body.supersedes(), vec!["old-note"]);
+
+        let doc = "---\nsupersedes: \"[[old-note]]\"\n---\nNew finding\n";
+        let from_fm = Note::parse(doc, Local::now()).unwrap();
+        assert_eq!(from_fm.supersedes(), vec!["old-note"]);
+    }
+
+    #[test]
+    fn a_note_declaring_both_forms_reports_the_target_once() {
+        let doc = "---\nsupersedes: \"[[old-note]]\"\n---\nNew finding\nsupersedes: [[old-note]]\n";
+        let n = Note::parse(doc, Local::now()).unwrap();
+        assert_eq!(n.supersedes(), vec!["old-note"]);
+    }
+
+    #[test]
+    fn links_come_from_the_body_and_exclude_embeds() {
+        let n = Note::new("Title\n![[shot.webp]]\nSee [[a-note]].").unwrap();
+        assert_eq!(n.links(), vec!["a-note"]);
     }
 
     #[test]

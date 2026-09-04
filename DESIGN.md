@@ -416,12 +416,15 @@ usable, so the viewer moved up from M4 with backlinks left behind.
 *Usable: notes become findable.*
 
 **M4 — Links.** `//` and `[[` pickers mid-note, link resolution, backlinks in the viewer,
-`supersedes` and its banner.
+`supersedes` and its banner. Done.
 *Usable: it becomes a connected system rather than a pile.*
-Done so far: both triggers, the picker, `[[link]]` insertion, `supersedes:` insertion, and
-links that resolve and are followable from the read-only view. Still owed: backlinks, and
-the banner that makes a supersession visible when reading the note it supersedes — which is
-index work, since it has to be derived from every *other* note.
+The index grew a `links` table and a schema version, because both halves are derived from
+every *other* note: a backlink is that table read backwards, and the banner is the same
+read filtered to `supersedes`. The version matters — without it an existing index keeps its
+recorded mtimes, the scan skips every note as unchanged, and nothing captured before the
+upgrade would ever acquire a link. `supersedes` is read from a body line *and* the
+frontmatter key §2 documents, since the picker writes the first and a hand-edited note may
+carry the second.
 
 **M5 — Sync.** git pull/commit/push, tray status, conflict handling.
 *Usable: it works on two machines.*

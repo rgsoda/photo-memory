@@ -3,9 +3,11 @@
 //! No I/O lives here. String in, struct out, string back.
 
 mod frontmatter;
+mod links;
 mod note;
 mod slug;
 
 pub use frontmatter::Frontmatter;
+pub use links::{links, supersedes};
 pub use note::{Note, ParseError};
 pub use slug::slugify;
