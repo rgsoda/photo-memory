@@ -1,0 +1,10 @@
+[package]
+name = "photomem-index"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+photomem-core.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+rusqlite = { version = "0.37", features = ["bundled"] }

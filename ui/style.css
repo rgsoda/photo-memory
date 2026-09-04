@@ -122,3 +122,137 @@ kbd {
   color: var(--error);
   font-size: 11px;
 }
+
+/* ── modes ─────────────────────────────────────────────────────────────── */
+
+#capture,
+#search,
+#viewer {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: var(--surface);
+}
+
+#capture[hidden],
+#search[hidden],
+#viewer[hidden] {
+  display: none;
+}
+
+/* ── search ────────────────────────────────────────────────────────────── */
+
+#query {
+  padding: 14px 20px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  outline: none;
+  background: var(--surface);
+  color: var(--text);
+  font: 15px/1.4 system-ui, sans-serif;
+  caret-color: var(--accent);
+}
+
+#query::placeholder { color: var(--muted); }
+
+#results {
+  flex: 1;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+#results li {
+  padding: 7px 12px;
+  border-radius: 6px;
+  cursor: default;
+}
+
+/* Selection is keyboard-driven, so it has to be unmistakable at a glance. */
+#results li[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+#results .row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+#results .title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#results .when {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+#results .snippet {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#results mark {
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+#results .empty {
+  padding: 18px 12px;
+  color: var(--muted);
+}
+
+/* ── viewer ────────────────────────────────────────────────────────────── */
+
+#viewer { padding: 16px 20px; overflow-y: auto; }
+
+#viewer header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+#viewer h1 { margin: 0; font-size: 16px; }
+
+#viewer time {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+#viewer-body {
+  margin: 0;
+  font: 13px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#viewer-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+#viewer-images img {
+  max-height: 150px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
+}

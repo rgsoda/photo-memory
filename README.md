@@ -60,8 +60,16 @@ windowrulev2 = stayfocused, class:^(photomem)$
 |---|---|
 | *(type)* | First non-empty line becomes the title and the filename slug |
 | `Ctrl+V` | Paste an image from the clipboard |
+| `//` | In an empty buffer, switch to search |
 | `Ctrl+Enter` | Save and hide |
 | `Esc` | Hide, stashing the text as a draft |
+
+In search: `↑`/`↓` move, `Enter` opens the note read-only, `Esc` goes back. Notes are never
+edited in the app — corrections are new notes that supersede old ones, and a typo is fixed
+by opening the file in any editor.
+
+Accents can be skipped while typing: `gesla` finds `gęślą`. The one exception is `ł`, which
+has no Unicode decomposition and so does not fold — `zazołc` finds `zażółć`, `zazolc` does not.
 
 Escape never loses text. The buffer is written to `.photomem/draft.md` and comes back on
 the next capture, cursor at the end.
@@ -72,7 +80,7 @@ the next capture, cursor at the end.
 vault/
   notes/2026-09-04-1652-kafka-rebalance-storm.md
   attachments/2026-09-04-e382057b79ca.webp
-  .photomem/                   # gitignored: drafts now, index and thumbs later
+  .photomem/                   # gitignored: index, thumbnails, drafts
   .gitignore
 ```
 
@@ -98,4 +106,5 @@ append-only capture reasonable.
 
 - No tray icon, so the daemon is stopped with `pkill -x photomem`.
 - Images show in a strip under the editor, not inline in the text.
-- No search (M3), links (M4), sync (M5), OCR (M6).
+- Search has no tag or date filters yet, and no backlinks (M4).
+- No links (M4), sync (M5), OCR (M6).

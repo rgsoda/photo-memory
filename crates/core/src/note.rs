@@ -87,6 +87,19 @@ impl Note {
         self.body.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default()
     }
 
+    /// The body with the title line removed.
+    ///
+    /// The title is displayed and indexed on its own, so repeating it in the
+    /// body would make every search snippet open with text the reader is
+    /// already looking at, and would blur the difference between a note *about*
+    /// a thing and one that merely mentions it.
+    pub fn content(&self) -> &str {
+        match self.body.split_once('\n') {
+            Some((_, rest)) => rest.trim_start_matches('\n'),
+            None => "",
+        }
+    }
+
     /// `2026-09-04-1618-kafka-consumer-rebalance-storm.md`
     ///
     /// Purely for humans reading `ls`; the app never parses this back.
@@ -139,6 +152,17 @@ mod tests {
     fn title_is_first_non_empty_line() {
         let n = Note::new("\n\n  Kafka rebalance  \n\nbody\n").unwrap();
         assert_eq!(n.title(), "Kafka rebalance");
+    }
+
+    #[test]
+    fn content_drops_the_title_line() {
+        let n = Note::new("Kafka rebalance\n\nConsumers were evicted.\nTwice.").unwrap();
+        assert_eq!(n.content(), "Consumers were evicted.\nTwice.");
+    }
+
+    #[test]
+    fn a_title_only_note_has_no_content() {
+        assert_eq!(Note::new("Just a title").unwrap().content(), "");
     }
 
     #[test]

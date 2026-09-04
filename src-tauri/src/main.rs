@@ -44,8 +44,13 @@ fn main() {
             commands::dismiss,
             commands::paste_image,
             commands::thumbnails,
+            commands::refresh,
+            commands::search,
+            commands::open_note,
         ])
         .setup(move |app| {
+            app.manage(commands::Search(std::sync::Mutex::new(open_index())));
+
             let window = app.get_webview_window("main").expect("main window exists");
             if let Mode::Window = mode {
                 present(&window);
@@ -54,6 +59,20 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running photomem");
+}
+
+/// Open the on-disk index, falling back to an in-memory one.
+///
+/// A search that is briefly empty is a much better failure than a capture window
+/// that will not start, so an unreadable index is never fatal.
+fn open_index() -> photomem_index::Index {
+    photomem_config::Config::load()
+        .map(|cfg| photomem_store::Vault::new(cfg.vault).state_dir().join("index.db"))
+        .and_then(|path| photomem_index::Index::open(&path).map_err(Into::into))
+        .unwrap_or_else(|e| {
+            eprintln!("photomem: falling back to an in-memory index: {e:#}");
+            photomem_index::Index::in_memory().expect("in-memory index")
+        })
 }
 
 /// Bring the capture window up and put the cursor in it.

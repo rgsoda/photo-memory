@@ -11,6 +11,7 @@ photomem-core.workspace = true
 photomem-config.workspace = true
 photomem-store.workspace = true
 photomem-images.workspace = true
+photomem-index.workspace = true
 chrono.workspace = true
 serde.workspace = true
 arboard = { version = "3", default-features = false, features = ["wayland-data-control", "image-data"] }

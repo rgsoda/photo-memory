@@ -173,12 +173,29 @@ Tables: `notes` (id, path, title, created, modified, body), `tags` (note_id, tag
 `links` (from_id, to_id — backlinks are this table read backwards), `attachments`
 (note_id, file, ocr_text), and an FTS5 virtual table over title + body + OCR text.
 
-A file watcher (`notify`) keeps it current, debounced ~200 ms. A full rebuild from a cold
-directory should take a couple of seconds for tens of thousands of notes, so the index is
-always disposable — delete it and it comes back.
+**The index is refreshed by scanning, not watching.** When the window is presented, the
+notes directory is walked and any file whose mtime or size differs from the indexed copy is
+re-read. A scan of a few thousand files costs milliseconds — less than the window takes to
+appear — and unlike a watcher it cannot miss an event, leak a thread, or fall out of step
+after a `git pull` rewrites files underneath it. A full rebuild from a cold directory is a
+couple of seconds, so the index stays disposable: delete it and it comes back.
 
-Search is FTS5 with prefix matching, ranked by BM25 with a recency boost. Target: results
-render within one frame of a keystroke.
+Search is FTS5 with prefix matching, ranked by BM25 with a recency boost. Two details that
+turned out to matter:
+
+- **`bm25()` takes one weight per column, including unindexed ones.** With `path` as the
+  first column, `bm25(notes_fts, 4.0, 1.0)` weights *`path`*, not the title — so a passing
+  mention outranks a note actually titled after the thing. The weights are `0.0, 4.0, 1.0`.
+- **Recency multiplies the score, it does not offset it.** BM25 magnitudes depend on corpus
+  size: around 1e-6 in a young vault, units in a large one. A fixed bonus is therefore
+  either meaningless or overwhelming, and picking a constant that works at both sizes is not
+  possible. Scaling by `1 + 0.25 · e^(−age/30d)` is size-independent, and keeps recency as a
+  tie-breaker between comparable matches rather than something that decides them.
+
+The tokenizer is `unicode61 remove_diacritics 2`, so `gesla` finds `gęślą`. One exception
+worth knowing: **`ł` does not fold** — it is a distinct letter with no Unicode
+decomposition, unlike ą, ć, ę, ń, ó, ś, ż and ź. `zazołc` matches `zażółć`; `zazolc` does
+not. Pinned by a test rather than left to be rediscovered.
 
 ---
 
@@ -337,8 +354,8 @@ photo-memory/
   crates/
     core/         # note parsing, frontmatter, links, tags, slugs. No I/O.
     config/       # ~/.config/photomem/config.toml
-    store/        # file read/write, atomic saves, drafts, watcher
-    index/        # SQLite + FTS5, search queries, backlinks, groupings
+    store/        # file read/write, atomic saves, drafts, attachments
+    index/        # SQLite + FTS5, directory scan, search, backlinks, groupings
     images/       # clipboard decode, downscale, WebP encode, thumbs, OCR
     sync/         # git2: pull/commit/push, conflict handling
     platform/     # trait + linux/ and macos/ impls: hotkey, clipboard, autostart
@@ -365,11 +382,13 @@ frontmatter, CLI + Hyprland binding. No search, no images. *Usable: it writes no
 **M2 — Images.** Clipboard paste, downscale, WebP, thumbnail strip, attachment refs.
 *Usable: the actual point of the app.*
 
-**M3 — Index and search.** SQLite/FTS5, file watcher, `//` search over an empty buffer.
+**M3 — Index and search.** SQLite/FTS5, directory scan on present, `//` search over an
+empty buffer, and the read-only viewer — a search whose results cannot be opened is not
+usable, so the viewer moved up from M4 with backlinks left behind.
 *Usable: notes become findable.*
 
-**M4 — Links.** `//` and `[[` pickers mid-note, link resolution, backlinks and the
-read-only viewer, `supersedes` and its banner.
+**M4 — Links.** `//` and `[[` pickers mid-note, link resolution, backlinks in the viewer,
+`supersedes` and its banner.
 *Usable: it becomes a connected system rather than a pile.*
 
 **M5 — Sync.** git pull/commit/push, tray status, conflict handling.

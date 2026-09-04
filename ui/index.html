@@ -7,19 +7,36 @@
   </head>
   <body>
     <main id="shell">
-      <textarea
-        id="editor"
-        placeholder="First line becomes the title…"
-        spellcheck="false"
-        autofocus
-      ></textarea>
-      <div id="strip" hidden></div>
+      <!-- Capture: the default, and the only mode that writes anything. -->
+      <section id="capture">
+        <textarea
+          id="editor"
+          placeholder="First line becomes the title…   //  to search"
+          spellcheck="false"
+          autofocus
+        ></textarea>
+        <div id="strip" hidden></div>
+      </section>
+
+      <!-- Search: reached by typing // into an empty buffer. -->
+      <section id="search" hidden>
+        <input id="query" type="text" placeholder="Search notes…" spellcheck="false" />
+        <ul id="results"></ul>
+      </section>
+
+      <!-- Viewer: read-only. Notes are never edited here; see DESIGN.md §6. -->
+      <section id="viewer" hidden>
+        <header>
+          <h1 id="viewer-title"></h1>
+          <time id="viewer-when"></time>
+        </header>
+        <pre id="viewer-body"></pre>
+        <div id="viewer-images"></div>
+      </section>
+
       <footer>
         <span id="status"></span>
-        <span class="hints">
-          <kbd>Ctrl</kbd><kbd>↵</kbd> save
-          <kbd>Esc</kbd> dismiss
-        </span>
+        <span id="hints"></span>
       </footer>
     </main>
     <script src="app.js"></script>
