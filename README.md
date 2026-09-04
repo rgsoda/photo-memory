@@ -103,6 +103,54 @@ o.window({ class = "^photomem$", title = "^photomem$" }, { size = "720 400" })
 
 Validate with `hyprctl reload && hyprctl configerrors`.
 
+**i3 / sway** — in `~/.config/i3/config`:
+
+```
+exec --no-startup-id photomem daemon
+bindsym $mod+n exec --no-startup-id photomem capture
+for_window [class="photomem"] floating enable, move position center
+for_window [class="photomem" title="^photomem$"] resize set 720 400
+```
+
+The second rule is narrower than the first on purpose: the image window sizes itself to
+the picture, so a class-wide `resize` would override it. Reload with `i3-msg reload`.
+
+On sway the file is `~/.config/sway/config`, the reload is `swaymsg reload`, and windows
+match on `app_id` rather than `class` — Wayland has no `WM_CLASS`.
+
+**KDE Plasma** — Autostart and the shortcut both live in System Settings: *Autostart →
+Add → Application → `photomem daemon`*, and *Keyboard → Shortcuts → Add New → Command or
+Script → `photomem capture`*, bound to Meta+N. The autostart entry is just a file, if you
+would rather write it — `~/.config/autostart/photomem.desktop`:
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=photomem daemon
+Exec=photomem daemon
+```
+
+**GNOME** — same autostart file. The hotkey is a custom shortcut under *Settings →
+Keyboard → View and Customize Shortcuts → Custom Shortcuts*, or from a terminal:
+
+```bash
+k=org.gnome.settings-daemon.plugins.media-keys
+p=/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/photomem/
+gsettings set $k custom-keybindings "['$p']"          # replaces the whole list
+gsettings set $k.custom-keybinding:$p name 'photomem'
+gsettings set $k.custom-keybinding:$p command 'photomem capture'
+gsettings set $k.custom-keybinding:$p binding '<Super>n'
+```
+
+That third line replaces every custom shortcut you have. If you already have some, append
+to what `gsettings get $k custom-keybindings` returns.
+
+Neither KDE nor GNOME needs window rules: KWin and Mutter float the window and honour the
+size it asks for. The Hyprland and i3 rules exist only because a tiling compositor does
+neither.
+
+`./install.sh` prints whichever of these applies to the desktop you are running.
+
 **macOS** — nothing to configure in a compositor: the app registers the hotkey itself.
 Start `photomem daemon` and press **`Ctrl+Alt+N`**.
 

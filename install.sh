@@ -127,9 +127,36 @@ esac
 # ── what to do next ──────────────────────────────────────────────────────────
 #
 # Wayland has no protocol for an application to register a global hotkey, so the
-# binding has to live in the compositor's own config. Which file that is depends
-# on the compositor, and Omarchy configures Hyprland in Lua rather than the
-# stock syntax, so print whichever one actually applies here.
+# binding has to live in the desktop's own config. Where that is differs per
+# desktop — and Omarchy configures Hyprland in Lua rather than the stock syntax
+# — so work out which one is actually in use and print only that.
+#
+# Ask the running session first and fall back to what is on disk, because the
+# session is the thing that will read the config, while a leftover ~/.config/i3
+# from a distro tried last year is not evidence of anything.
+
+detect_desktop() {
+    # Lower-cased so the match does not depend on a session calling itself
+    # "GNOME", "gnome" or "ubuntu:GNOME".
+    local d
+    d="$(printf '%s%s' "${XDG_CURRENT_DESKTOP:-}" "${DESKTOP_SESSION:-}" | tr '[:upper:]' '[:lower:]')"
+    case "$d" in
+        *hyprland*)     echo hyprland; return ;;
+        *sway*)         echo sway;     return ;;
+        *i3*)           echo i3;       return ;;
+        *kde*|*plasma*) echo kde;      return ;;
+        *gnome*|*unity*|*cinnamon*) echo gnome; return ;;
+    esac
+
+    if   [ -f "$HOME/.config/hypr/hyprland.lua" ]  \
+      || [ -f "$HOME/.config/hypr/hyprland.conf" ]; then echo hyprland
+    elif [ -f "$HOME/.config/i3/config" ] || [ -f "$HOME/.i3/config" ]; then echo i3
+    elif [ -f "$HOME/.config/sway/config" ];        then echo sway
+    elif command -v plasmashell >/dev/null 2>&1;    then echo kde
+    elif command -v gnome-shell >/dev/null 2>&1;    then echo gnome
+    else echo unknown
+    fi
+}
 
 cat <<EOF
 
@@ -143,6 +170,11 @@ $(printf '%s' "$bold")Next:$(printf '%s' "$off")
      'photomem capture' wakes it, which is what makes the popup feel instant.
 EOF
 
+desktop="$(detect_desktop)"
+
+case "$desktop" in
+
+hyprland)
 if [ -f "$HOME/.config/hypr/hyprland.lua" ]; then
     cat <<'EOF'
 
@@ -164,7 +196,7 @@ if [ -f "$HOME/.config/hypr/hyprland.lua" ]; then
 
      Then: hyprctl reload && hyprctl configerrors
 EOF
-elif [ -f "$HOME/.config/hypr/hyprland.conf" ]; then
+else
     cat <<'EOF'
 
      In ~/.config/hypr/hyprland.conf:
@@ -176,14 +208,106 @@ elif [ -f "$HOME/.config/hypr/hyprland.conf" ]; then
 
      Then: hyprctl reload && hyprctl configerrors
 EOF
+fi
+;;
+
+i3|sway)
+# Same window manager twice over, so the same advice with three words swapped:
+# sway reads a different file, reloads with a different command, and matches
+# Wayland windows on app_id where i3 matches X11 windows on class.
+# These paths are printed for a human to read, never opened, so the literal
+# tilde is the point.
+# shellcheck disable=SC2088
+if [ "$desktop" = sway ]; then
+    file="~/.config/sway/config"; reload="swaymsg reload"; sel="app_id"
 else
+    file="~/.config/i3/config";   reload="i3-msg reload";  sel="class"
+fi
+    cat <<EOF
+
+     In $file:
+
+       exec --no-startup-id photomem daemon
+       bindsym \$mod+n exec --no-startup-id photomem capture
+
+     It tiles by default, so the popup has to be told to float — otherwise it
+     takes over half the workspace:
+
+       for_window [$sel="photomem"] floating enable, move position center
+       for_window [$sel="photomem" title="^photomem\$"] resize set 720 400
+
+     The second rule is deliberately narrower than the first. The image window
+     sizes itself to the picture it is showing, and a class-wide resize would
+     override that.
+
+     Then: $reload
+EOF
+;;
+
+kde)
     cat <<'EOF'
 
-     No Hyprland config found. Bind SUPER+N to 'photomem capture' and autostart
-     'photomem daemon' however your desktop does it — README.md has the
-     Hyprland version, which is the only one tested so far.
+     KDE Plasma keeps both of these somewhere no one should be hand-editing,
+     so they are done through System Settings:
+
+       Autostart:  Autostart → Add → Application → photomem daemon
+       Hotkey:     Keyboard → Shortcuts → Add New → Command or Script,
+                   enter 'photomem capture', then press Meta+N
+
+     Or write the file the Autostart page would write yourself,
+     ~/.config/autostart/photomem.desktop:
+
+       [Desktop Entry]
+       Type=Application
+       Name=photomem daemon
+       Exec=photomem daemon
+
+     No window rules are needed here. KWin floats windows and honours the size
+     photomem asks for; the Hyprland and i3 rules exist only because a tiling
+     compositor does neither.
 EOF
-fi
+;;
+
+gnome)
+    cat <<'EOF'
+
+     Autostart is a file — ~/.config/autostart/photomem.desktop:
+
+       [Desktop Entry]
+       Type=Application
+       Name=photomem daemon
+       Exec=photomem daemon
+
+     The hotkey is a custom shortcut: Settings → Keyboard → View and Customize
+     Shortcuts → Custom Shortcuts → +, with the command 'photomem capture'
+     bound to Super+N. The same thing from a terminal:
+
+       k=org.gnome.settings-daemon.plugins.media-keys
+       p=/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/photomem/
+       gsettings set $k custom-keybindings "['$p']"
+       gsettings set $k.custom-keybinding:$p name 'photomem'
+       gsettings set $k.custom-keybinding:$p command 'photomem capture'
+       gsettings set $k.custom-keybinding:$p binding '<Super>n'
+
+     Careful with that third line: it replaces the entire list of custom
+     shortcuts. If you already have some, append to what 'gsettings get $k
+     custom-keybindings' returns instead of overwriting it.
+
+     No window rules are needed; Mutter floats the window and honours the size
+     photomem asks for.
+EOF
+;;
+
+*)
+    cat <<'EOF'
+
+     Could not tell which desktop this is. Two things to arrange, however
+     yours does them: run 'photomem daemon' at login, and bind a key to
+     'photomem capture'. On a tiling window manager, also make the window
+     float. README.md spells this out for Hyprland, i3, KDE and GNOME.
+EOF
+;;
+esac
 
 echo
 say "Done. See README.md for the keys, and DESIGN.md for what it is."
