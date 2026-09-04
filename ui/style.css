@@ -273,6 +273,72 @@ kbd {
   border: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
 }
 
+/* The correction banner. Loud on purpose: a plain backlink is too quiet to
+   carry "what you are reading was later proved wrong", which is the one thing
+   an append-only record cannot otherwise say. See DESIGN.md §6. */
+#viewer-superseded {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--error) 45%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  font-size: 12px;
+}
+
+/* Inherits the banner's colour rather than the link accent: inside a warning,
+   a blue link reads as a second, competing signal. */
+#viewer-superseded .link {
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+#viewer-backlinks {
+  margin-top: 18px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+#viewer-backlinks h2 {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+#viewer-backlinks ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#viewer-backlinks li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+#viewer-backlinks .link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+#viewer-backlinks .when {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── image window ──────────────────────────────────────────────────────── */
 
 /* Its own top-level window, sized big at creation. A compositor honours the

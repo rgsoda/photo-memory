@@ -7,6 +7,8 @@ const status = document.getElementById("status");
 const hints = document.getElementById("hints");
 const query = document.getElementById("query");
 const results = document.getElementById("results");
+const superseded = document.getElementById("viewer-superseded");
+const backlinks = document.getElementById("viewer-backlinks");
 
 const panes = {
   capture: document.getElementById("capture"),
@@ -416,39 +418,81 @@ async function openLink(name) {
 }
 
 /**
- * Rebuild the body with its `[[links]]` as clickable nodes.
+ * A clickable reference to another note.
  *
- * Built as nodes rather than markup because note text must never reach
- * innerHTML — the same reason `markSnippet` works this way.
+ * Built as a node rather than markup because note text must never reach
+ * innerHTML — the same reason `markSnippet` works this way. `label` differs
+ * from `name` wherever there is a title worth showing instead of a filename.
  */
+function noteLink(name, label = name) {
+  const a = document.createElement("a");
+  a.className = "link";
+  a.textContent = label;
+  a.title = `open ${name}`;
+  // Reachable by Tab, because nothing else in this app needs a mouse.
+  a.tabIndex = 0;
+  a.addEventListener("click", () => openLink(name));
+  a.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    openLink(name);
+  });
+  return a;
+}
+
+/** Rebuild the body with its `[[links]]` as clickable nodes. */
 function linkedBody(body) {
   const out = [];
   let at = 0;
   for (const m of body.matchAll(LINK)) {
     out.push(document.createTextNode(body.slice(at, m.index)));
-    const a = document.createElement("a");
-    a.className = "link";
-    a.textContent = m[1];
-    a.title = `open ${m[1]}`;
-    // Reachable by Tab, because nothing else in this app needs a mouse.
-    a.tabIndex = 0;
-    a.addEventListener("click", () => openLink(m[1]));
-    a.addEventListener("keydown", (e) => {
-      if (e.key !== "Enter") return;
-      e.preventDefault();
-      openLink(m[1]);
-    });
-    out.push(a);
+    out.push(noteLink(m[1]));
     at = m.index + m[0].length;
   }
   out.push(document.createTextNode(body.slice(at)));
   return out;
 }
 
+/**
+ * The banner that keeps append-only honest.
+ *
+ * A plain backlink is too quiet to carry "this was later proved wrong", which
+ * is why supersession is a typed link and why this sits above the title rather
+ * than in the list at the bottom. See DESIGN.md §6.
+ */
+function showSupersession(ref) {
+  superseded.hidden = !ref;
+  if (!ref) return;
+  superseded.replaceChildren(
+    document.createTextNode("⚠ Superseded by "),
+    noteLink(ref.name, ref.title),
+    document.createTextNode(` — ${ref.when}`)
+  );
+}
+
+/** Notes pointing at this one, newest first. */
+function showBacklinks(refs) {
+  backlinks.hidden = refs.length === 0;
+  if (!refs.length) return;
+  backlinks.querySelector("ul").replaceChildren(
+    ...refs.map((ref) => {
+      const li = document.createElement("li");
+      const when = document.createElement("span");
+      when.className = "when";
+      when.textContent = ref.when;
+      li.append(noteLink(ref.name, ref.title), when);
+      return li;
+    })
+  );
+}
+
 function showNote(note) {
   document.getElementById("viewer-title").replaceChildren(...linkedBody(note.title));
   document.getElementById("viewer-when").textContent = note.when;
   document.getElementById("viewer-body").replaceChildren(...linkedBody(note.body));
+
+  showSupersession(note.superseded_by);
+  showBacklinks(note.backlinks);
 
   gallery = note.images.map((i) => i.name);
   document

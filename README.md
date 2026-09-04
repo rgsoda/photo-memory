@@ -133,6 +133,11 @@ literal `//` behind. A trigger only fires at the start of a word, so `https://` 
 
 Citations render as links in the read-only view: `Tab` reaches them and `Enter` follows.
 
+An open note shows what links to it under "Linked from", and one that a later note declares
+it `supersedes:` opens with a banner naming the correction — `Tab` reaches both and `Enter`
+follows. Where several notes correct the same one the banner names the newest, and the
+others stay in the list rather than disappearing.
+
 In a note: `↑`/`↓` (or `j`/`k`) scroll a line, `PageUp`/`PageDown` and `Space` scroll a
 screen, `Home`/`End` jump to either end, and `Tab` reaches its `[[links]]` with `Enter` to
 follow. `V` opens its image in its own window, as does clicking any thumbnail. That
@@ -188,8 +193,6 @@ and every change to the page appears to do nothing.
 - No tray icon, so the daemon is stopped with `pkill -x photomem`.
 - Images show in a strip under the editor, not inline in the text.
 - Search has no tag or date filters yet.
-- Links can be written and followed, but a note does not yet show what links *to* it, and a
-  superseded note opens with no banner saying so (M4).
 - `photomem --help` opens the window instead of printing help.
 - On macOS the app runs but is not packaged: no `.app` bundle, menu bar agent or
   LaunchAgent, and `install.sh` is Linux-only (M8).

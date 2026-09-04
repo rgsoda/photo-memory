@@ -159,6 +159,22 @@ pub fn search(search: State<'_, Search>, query: String) -> CmdResult<Vec<HitView
         .collect())
 }
 
+/// Another note pointing at the one being read.
+#[derive(serde::Serialize)]
+pub struct RefView {
+    name: String,
+    title: String,
+    when: String,
+}
+
+impl From<photomem_index::Ref> for RefView {
+    fn from(r: photomem_index::Ref) -> RefView {
+        // Date only: a backlink is a pointer, not an event, and the time of day
+        // it was written says nothing useful about the note being read.
+        RefView { name: r.name, title: r.title, when: r.created.format("%Y-%m-%d").to_string() }
+    }
+}
+
 /// A note opened from search results. Read-only by design (see DESIGN.md §6).
 #[derive(serde::Serialize)]
 pub struct NoteView {
@@ -169,17 +185,24 @@ pub struct NoteView {
     /// Body with the title line removed, since the title is displayed separately.
     body: String,
     images: Vec<Pasted>,
+    /// The newest note declaring it corrects this one, if any. The failure mode
+    /// of append-only is reading something later proved wrong without being
+    /// told, which is what this exists to prevent.
+    superseded_by: Option<RefView>,
+    /// Notes that reference this one.
+    backlinks: Vec<RefView>,
 }
 
 #[tauri::command]
-pub fn open_note(path: String) -> CmdResult<NoteView> {
+pub fn open_note(search: State<'_, Search>, path: String) -> CmdResult<NoteView> {
     let vault = vault()?;
     let path = std::path::PathBuf::from(path);
     // Only ever read notes from inside the vault, whatever the UI passes.
     if !path.starts_with(vault.notes_dir()) {
         return Err("that note is not in the vault".into());
     }
-    read_note(&vault, &path)
+    let index = search.0.lock().map_err(|_| "index is poisoned".to_string())?;
+    read_note(&vault, &index, &path)
 }
 
 /// Open the note a `[[link]]` points at.
@@ -188,14 +211,15 @@ pub fn open_note(path: String) -> CmdResult<NoteView> {
 /// a search: a link that resolves to nothing is a dangling link, and saying so
 /// is more useful than showing the nearest match.
 #[tauri::command]
-pub fn open_link(name: String) -> CmdResult<NoteView> {
+pub fn open_link(search: State<'_, Search>, name: String) -> CmdResult<NoteView> {
     let vault = vault()?;
     let name = safe_link(&name).ok_or_else(|| format!("{name} is not a note name"))?;
     let path = vault.notes_dir().join(format!("{name}.md"));
     if !path.is_file() {
         return Err(format!("no note called {name}"));
     }
-    read_note(&vault, &path)
+    let index = search.0.lock().map_err(|_| "index is poisoned".to_string())?;
+    read_note(&vault, &index, &path)
 }
 
 /// The `[[link]]` target for a note: its filename without the `.md`.
@@ -215,9 +239,10 @@ fn safe_link(name: &str) -> Option<&str> {
     (!bad).then_some(name)
 }
 
-fn read_note(vault: &Vault, path: &std::path::Path) -> CmdResult<NoteView> {
+fn read_note(vault: &Vault, index: &Index, path: &std::path::Path) -> CmdResult<NoteView> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{e}"))?;
     let note = Note::parse(&text, chrono::Local::now()).map_err(|e| e.to_string())?;
+    let name = link_name(path);
 
     let images = embedded_names(note.content())
         .into_iter()
@@ -227,13 +252,39 @@ fn read_note(vault: &Vault, path: &std::path::Path) -> CmdResult<NoteView> {
         })
         .collect();
 
+    // Both are claims made by *other* notes, so they come from the index rather
+    // than from the file in hand — the whole reason M4 is index work.
+    let superseded_by = index.superseded_by(&name).map_err(|e| format!("{e:#}"))?;
+    let backlinks = index.backlinks(&name).map_err(|e| format!("{e:#}"))?;
+
+    let backlinks = other_backlinks(backlinks, superseded_by.as_ref());
+
     Ok(NoteView {
-        name: link_name(path),
+        name,
         title: note.title().to_string(),
         when: note.created.format("%Y-%m-%d %H:%M").to_string(),
         body: without_embed_lines(note.content()),
         images,
+        superseded_by: superseded_by.map(RefView::from),
+        backlinks,
     })
+}
+
+/// Backlinks minus the note the banner already names.
+///
+/// The banner states it loudly above the title; repeating it in the list below
+/// would say the same thing twice in a 720px window. Every *other* note that
+/// points here still appears — including an older correction that the banner,
+/// which names only the newest, did not pick.
+fn other_backlinks(
+    backlinks: Vec<photomem_index::Ref>,
+    banner: Option<&photomem_index::Ref>,
+) -> Vec<RefView> {
+    backlinks
+        .into_iter()
+        .filter(|r| banner.is_none_or(|b| b.name != r.name))
+        .map(RefView::from)
+        .collect()
 }
 
 /// Drop lines that are nothing but an embed.
@@ -269,7 +320,36 @@ fn embedded_names(body: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{embedded_names, safe_link, without_embed_lines};
+    use super::{embedded_names, other_backlinks, safe_link, without_embed_lines};
+
+    fn reference(name: &str) -> photomem_index::Ref {
+        photomem_index::Ref {
+            path: std::path::PathBuf::from(format!("/notes/{name}.md")),
+            name: name.to_string(),
+            title: name.to_string(),
+            created: chrono::Local::now(),
+        }
+    }
+
+    #[test]
+    fn the_banner_note_is_not_repeated_in_the_backlinks() {
+        let refs = vec![reference("second-fix"), reference("first-fix"), reference("mentions")];
+        let banner = reference("second-fix");
+
+        let shown: Vec<String> =
+            other_backlinks(refs, Some(&banner)).into_iter().map(|r| r.name).collect();
+        // The older correction must survive: the banner names only the newest,
+        // and an append-only record that hid one of its own corrections would
+        // be doing the exact thing M4 exists to prevent.
+        assert_eq!(shown, ["first-fix", "mentions"]);
+    }
+
+    #[test]
+    fn with_no_correction_every_backlink_is_listed() {
+        let refs = vec![reference("a"), reference("b")];
+        assert_eq!(other_backlinks(refs, None).len(), 2);
+    }
+
 
     #[test]
     fn link_names_are_bare_and_extensionless() {
