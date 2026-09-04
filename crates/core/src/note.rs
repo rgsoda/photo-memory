@@ -208,7 +208,15 @@ mod tests {
     fn filename_combines_timestamp_and_slug() {
         let mut n = Note::new("Kafka rebalance storm").unwrap();
         n.created = at("2026-09-04T16:18:42+02:00");
-        assert_eq!(n.filename(), "2026-09-04-1618-kafka-rebalance-storm.md");
+
+        // The stamp is the note's *local* wall clock, since the only reader of
+        // a filename is a person running `ls` in their own timezone. Spelling
+        // the expected minute out as a literal would be asserting the machine's
+        // offset rather than this function, and would fail everywhere but here.
+        let stamp = n.created.format("%Y-%m-%d-%H%M");
+        assert_eq!(n.filename(), format!("{stamp}-kafka-rebalance-storm.md"));
+        // Minute precision, no seconds: that is what makes it readable.
+        assert_eq!(stamp.to_string().len(), "2026-09-04-1618".len());
     }
 
     #[test]
