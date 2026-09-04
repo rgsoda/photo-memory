@@ -61,9 +61,12 @@ o.launch_on_start("photomem daemon")
 o.bind("SUPER + N", "Photo memory", "photomem capture")
 
 -- ~/.config/hypr/hyprland.lua
--- Match the title as well: every photomem window shares the class, so a
--- class-only rule pins the fullscreen image window to 720x400 too.
-o.window({ class = "^photomem$", title = "^photomem$" }, { float = true, center = true, size = "720 400" })
+-- Both windows float and centre...
+o.window({ class = "^photomem$" }, { float = true, center = true })
+-- ...but only the capture window has a fixed size. The image window sizes itself
+-- to the picture, and a class-wide size rule would override that — and a
+-- title-scoped float rule would leave the image window tiling.
+o.window({ class = "^photomem$", title = "^photomem$" }, { size = "720 400" })
 ```
 
 Validate with `hyprctl reload && hyprctl configerrors`.
@@ -82,9 +85,11 @@ Validate with `hyprctl reload && hyprctl configerrors`.
 
 In search: `↑`/`↓` move, `Enter` opens the note read-only, `Esc` goes back.
 
-In a note: `V` opens its image in a fullscreen window, as does clicking any thumbnail. `Z`
-(or a click) toggles fit-to-screen and 1:1 — drag to pan — `←`/`→` step through the note's
-images, and `Esc` closes it. Notes are never
+In a note: `V` opens its image in its own window, as does clicking any thumbnail. That
+window is always 1600px on its long edge in the image's aspect ratio, so a full-screen
+capture opens at its own size and a smaller image is scaled up into the same frame. `Z` (or
+a click) toggles fit and 1:1 — drag to pan — `←`/`→` step through the note's images, and
+`Esc` closes it. Notes are never
 edited in the app — corrections are new notes that supersede old ones, and a typo is fixed
 by opening the file in any editor.
 

@@ -39,12 +39,18 @@ async function show(index) {
   shown = (index + names.length) % names.length;
   const name = names[shown];
 
+  let full;
   try {
-    image.src = await invoke("read_image", { name });
+    full = await invoke("read_image", { name });
   } catch (e) {
     caption.textContent = String(e);
     return;
   }
+
+  image.src = full.url;
+  // Reshape the window to the picture before showing it, so stepping through a
+  // note's images never leaves the frame the wrong shape.
+  invoke("fit_image_window", { width: full.width, height: full.height }).catch(() => {});
 
   image.alt = name;
   caption.textContent = names.length > 1 ? `${name}  ·  ${shown + 1}/${names.length}` : name;

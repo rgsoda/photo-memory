@@ -50,6 +50,7 @@ fn main() {
             commands::read_image,
             commands::open_image,
             commands::close_image,
+            commands::fit_image_window,
         ])
         .setup(move |app| {
             app.manage(commands::Search(std::sync::Mutex::new(open_index())));

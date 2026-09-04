@@ -286,9 +286,12 @@ Actions available on a displayed note: copy its `[[link]]`, open the file in `$E
 reveal it in a file manager, start a new note that supersedes it.
 
 **Opening an image.** `V` in the viewer, or clicking any thumbnail — including one in the
-capture strip — opens the picture in a **separate fullscreen window**. `Z` or a click
-toggles fit-to-screen and 1:1 with drag-to-pan; `←`/`→` step through the note's images;
-`Esc` closes it and leaves the capture window as it was.
+capture strip — opens the picture in a **separate window sized to the picture**: always
+`max_edge` (1600px) on its long side, in the image's own aspect ratio. Images are stored
+capped at that, so a full-screen capture opens at exactly its own size, and a smaller one is
+scaled up into the same frame rather than the window shrinking and growing as you step
+through a note. `Z` or a click toggles fit and 1:1 with drag-to-pan; `←`/`→` step through
+the note's images; `Esc` closes it and leaves the capture window as it was.
 
 A separate window, because reading the text in a captured Slack thread is the entire point
 of keeping the picture, and a 1600px image scaled into a 720px capture window is no more
@@ -296,12 +299,13 @@ readable than its thumbnail.
 
 Two things this cost, both worth recording:
 
-- **The window rule has to match on title, not just class.** Every photomem window shares
-  the class, so `o.window({ class = "^photomem$" }, { size = "720 400" })` pins the image
-  window to 720x400 too — and, because a compositor rule outranks the client, it also makes
-  Tauri's `set_size` silently do nothing. That looked exactly like Wayland refusing
-  client-initiated resizes on principle, which it is not. Adding `title = "^photomem$"`
-  scopes the rule to the capture window.
+- **The window rules have to be split in two.** Every photomem window shares the class, so
+  `o.window({ class = "^photomem$" }, { size = "720 400" })` pins the image window to
+  720x400 as well — and because a compositor rule outranks the client, it also makes Tauri's
+  `set_size` silently do nothing, which looks exactly like Wayland refusing client resizes on
+  principle. It is not. But scoping the *whole* rule by title then leaves the image window
+  with no `float`, so it tiles instead. Both windows need `float` and `center`; only the
+  capture window may have a fixed `size`.
 - **Fit scales up, not just down.** On a 4K screen a 1600px capture sits small in the middle
   of an empty window unless fit is allowed to enlarge it — and there, fit is the *larger* of
   the two modes, which is why they are labelled "fit" and "1:1" rather than "fit" and

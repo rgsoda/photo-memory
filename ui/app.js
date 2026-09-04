@@ -316,6 +316,14 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// Focus returns to the window without the page being told which element should
+// have it — after the image window closes, or after a click on the frame. The
+// editor is the only thing here worth typing into, so it always takes it back.
+window.addEventListener("focus", () => {
+  if (mode === "search") query.focus();
+  else if (mode === "capture") focusEditor();
+});
+
 // The window is reused rather than recreated, so every hotkey press after the
 // first arrives as this event instead of a page load.
 listen("photomem://present", () => {

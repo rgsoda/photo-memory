@@ -75,7 +75,10 @@ fn data_url(bytes: &[u8]) -> String {
 #[tauri::command]
 pub fn paste_image() -> CmdResult<Pasted> {
     let mut clipboard = arboard::Clipboard::new().map_err(|e| format!("clipboard: {e}"))?;
-    let image = clipboard.get_image().map_err(|_| "no image on the clipboard".to_string())?;
+    let image = clipboard.get_image().map_err(|e| {
+        eprintln!("photomem: clipboard image read failed: {e}");
+        "no image on the clipboard".to_string()
+    })?;
 
     let cfg = Config::load().map_err(|e| format!("{e:#}"))?;
     let attachment = photomem_images::from_rgba(
@@ -242,15 +245,53 @@ mod tests {
     }
 }
 
-/// The stored image at full size, for the lightbox.
+/// The stored image at full size, with the window size it wants.
 ///
 /// Around 100 KB, so ~140 KB as base64 — worth it to keep the asset protocol
 /// closed and every image path going through one guarded reader.
+#[derive(serde::Serialize)]
+pub struct FullImage {
+    url: String,
+    width: f64,
+    height: f64,
+}
+
 #[tauri::command]
-pub fn read_image(name: String) -> CmdResult<String> {
+pub fn read_image(name: String) -> CmdResult<FullImage> {
     let vault = vault()?;
     let bytes = vault.read_attachment(&name).ok_or_else(|| format!("no image named {name}"))?;
-    Ok(data_url(&bytes))
+    let (w, h) = photomem_images::dimensions(&bytes).ok_or("that file is not a WebP image")?;
+    let (width, height) = window_size_for(w, h);
+    Ok(FullImage { url: data_url(&bytes), width, height })
+}
+
+/// The window an image of `w`x`h` should open at.
+///
+/// Always `MAX_EDGE` on the long side, whatever the picture measures: images
+/// are stored capped at that, so a full-screen capture opens at its own size
+/// and a smaller one is scaled up to the same frame rather than opening a
+/// window that shrinks and grows as you step through a note.
+fn window_size_for(w: u32, h: u32) -> (f64, f64) {
+    let edge = photomem_images::MAX_EDGE as f64;
+    let scale = edge / w.max(h) as f64;
+    (w as f64 * scale, h as f64 * scale)
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::window_size_for;
+
+    #[test]
+    fn a_stored_image_opens_at_its_own_size() {
+        assert_eq!(window_size_for(1600, 900), (1600.0, 900.0));
+    }
+
+    #[test]
+    fn a_smaller_image_is_scaled_up_to_the_same_long_edge() {
+        assert_eq!(window_size_for(800, 600), (1600.0, 1200.0));
+        // Portrait: the long edge is the height.
+        assert_eq!(window_size_for(600, 800), (1200.0, 1600.0));
+    }
 }
 
 
@@ -282,17 +323,55 @@ pub fn open_image<R: Runtime>(
         urlencode(&serde_json::to_string(&names).map_err(|e| e.to_string())?)
     );
 
-    // Fullscreen rather than a large size: a compositor treats fullscreen as a
-    // protocol state and honours it, while it is free to ignore the pixel size a
-    // client asks for — and Hyprland does, both at creation and on resize.
+    // Sized from the first image once it is known; the window is created small
+    // and resized by `fit_image_window` as soon as the page has its picture,
+    // which avoids reading the file twice.
     tauri::WebviewWindowBuilder::new(&app, IMAGE_WINDOW, tauri::WebviewUrl::App(query.into()))
         .title("photomem — image")
         .decorations(false)
-        .fullscreen(true)
+        .center()
         .focused(true)
+        .visible(false)
         .build()
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Resize the image window to the picture it is showing, then reveal it.
+///
+/// Called by the page rather than at build time so that stepping to the next
+/// image reshapes the window too. The window stays hidden until this runs, so
+/// it never appears at the wrong size first.
+#[tauri::command]
+pub fn fit_image_window<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    width: f64,
+    height: f64,
+) -> CmdResult<()> {
+    let window = app.get_webview_window(IMAGE_WINDOW).ok_or("no image window")?;
+
+    // Never larger than the screen it has to fit on.
+    let (mut w, mut h) = (width, height + FOOTER_HEIGHT);
+    if let Some((mw, mh)) = monitor_size(&app) {
+        let shrink = (mw * 0.95 / w).min(mh * 0.95 / h).min(1.0);
+        w *= shrink;
+        h *= shrink;
+    }
+
+    window.set_size(tauri::LogicalSize::new(w, h)).map_err(|e| e.to_string())?;
+    window.center().map_err(|e| e.to_string())?;
+    let _ = window.show();
+    let _ = window.set_focus();
+    Ok(())
+}
+
+/// Height of the caption and hints strip under the picture.
+const FOOTER_HEIGHT: f64 = 30.0;
+
+fn monitor_size<R: Runtime>(app: &tauri::AppHandle<R>) -> Option<(f64, f64)> {
+    let monitor = app.get_webview_window("main")?.current_monitor().ok()??;
+    let logical = monitor.size().to_logical::<f64>(monitor.scale_factor());
+    Some((logical.width, logical.height))
 }
 
 #[tauri::command]

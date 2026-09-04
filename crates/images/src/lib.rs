@@ -70,6 +70,14 @@ pub fn from_rgba(width: u32, height: u32, rgba: &[u8], opts: Options) -> Result<
     Ok(build(DynamicImage::ImageRgba8(img), &hash_of(width, height, rgba), opts))
 }
 
+/// Width and height of a stored WebP, without keeping the decoded pixels.
+///
+/// The image window is sized to its picture, so it needs this before it opens.
+pub fn dimensions(webp: &[u8]) -> Option<(u32, u32)> {
+    let decoded = webp::Decoder::new(webp).decode()?;
+    Some((decoded.width(), decoded.height()))
+}
+
 /// Process an already-encoded image, as delivered by a webview paste event.
 pub fn from_encoded(bytes: &[u8], opts: Options) -> Result<Attachment> {
     let img = image::load_from_memory(bytes).context("decoding pasted image")?;
@@ -165,6 +173,13 @@ mod tests {
         let a = from_rgba(200, 100, &gradient(200, 100), Options::default()).unwrap();
         let decoded = webp::Decoder::new(&a.webp).decode().expect("decodes");
         assert_eq!((decoded.width(), decoded.height()), (200, 100));
+    }
+
+    #[test]
+    fn reads_back_the_stored_dimensions() {
+        let a = from_rgba(2400, 1200, &gradient(2400, 1200), Options::default()).unwrap();
+        assert_eq!(dimensions(&a.webp), Some((a.width, a.height)));
+        assert_eq!(dimensions(b"not a webp"), None);
     }
 
     #[test]
