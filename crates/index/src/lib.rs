@@ -44,6 +44,15 @@ CREATE TABLE IF NOT EXISTS links (
 );
 
 CREATE INDEX IF NOT EXISTS links_target ON links (target);
+
+CREATE TABLE IF NOT EXISTS attachments (
+    from_path TEXT NOT NULL,
+    name      TEXT NOT NULL,
+    position  INTEGER NOT NULL,
+    PRIMARY KEY (from_path, name)
+);
+
+CREATE INDEX IF NOT EXISTS attachments_name ON attachments (name);
 ";
 
 /// Bumped whenever the tables change shape.
@@ -53,7 +62,7 @@ CREATE INDEX IF NOT EXISTS links_target ON links (target);
 /// recorded mtime and size, `sync` skips them as unchanged, and they would
 /// never acquire the links a newly added table wants — leaving backlinks
 /// silently empty for every note captured before the upgrade.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 /// An ordinary `[[name]]` mention.
 const KIND_LINK: &str = "link";
@@ -81,6 +90,18 @@ pub struct Ref {
     pub path: PathBuf,
     /// This note's `[[link]]` target: its filename without the `.md`.
     pub name: String,
+    pub title: String,
+    pub created: DateTime<Local>,
+}
+
+/// One picture on the thumbnail wall, and the note it belongs to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shot {
+    /// Attachment filename, as the note embeds it.
+    pub name: String,
+    pub note: PathBuf,
+    /// The note's `[[link]]` target.
+    pub note_name: String,
     pub title: String,
     pub created: DateTime<Local>,
 }
@@ -123,7 +144,8 @@ impl Index {
         let found: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap_or(0);
         if found != SCHEMA_VERSION {
             db.execute_batch(
-                "DROP TABLE IF EXISTS links;
+                "DROP TABLE IF EXISTS attachments;
+                 DROP TABLE IF EXISTS links;
                  DROP TABLE IF EXISTS notes_fts;
                  DROP TABLE IF EXISTS notes;",
             )?;
@@ -204,6 +226,7 @@ impl Index {
         // Links are rewritten wholesale rather than diffed: a note edited to drop
         // a reference must not leave the old backlink behind.
         self.db.execute("DELETE FROM links WHERE from_path = ?1", [path])?;
+        self.db.execute("DELETE FROM attachments WHERE from_path = ?1", [path])?;
         self.db.execute(
             "INSERT OR REPLACE INTO notes (path, id, name, title, created, mtime, size)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -231,7 +254,46 @@ impl Index {
         for target in note.supersedes() {
             stmt.execute(params![path, target, KIND_SUPERSEDES])?;
         }
+
+        let mut stmt = self.db.prepare(
+            "INSERT OR IGNORE INTO attachments (from_path, name, position) VALUES (?1, ?2, ?3)",
+        )?;
+        for (i, name) in note.embeds().iter().enumerate() {
+            stmt.execute(params![path, name, i as i64])?;
+        }
         Ok(())
+    }
+
+    /// Every captured image, newest note first.
+    ///
+    /// One row per picture, not per embed: the same screenshot pasted into two
+    /// notes is one thing you would recognise on the wall, and it belongs to
+    /// the note you wrote most recently about it. Within a note the pictures
+    /// keep the order they were pasted in.
+    pub fn wall(&self, limit: usize) -> Result<Vec<Shot>> {
+        let mut stmt = self.db.prepare(
+            "SELECT a.name, n.path, n.name, n.title, n.created
+             FROM attachments a JOIN notes n ON n.path = a.from_path
+             WHERE n.created = (SELECT MAX(n2.created)
+                                FROM attachments a2 JOIN notes n2 ON n2.path = a2.from_path
+                                WHERE a2.name = a.name)
+             GROUP BY a.name
+             ORDER BY n.created DESC, a.position ASC
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit as i64], |r| {
+            let created: String = r.get(4)?;
+            Ok(Shot {
+                name: r.get(0)?,
+                note: PathBuf::from(r.get::<_, String>(1)?),
+                note_name: r.get(2)?,
+                title: r.get(3)?,
+                created: DateTime::parse_from_rfc3339(&created)
+                    .map(|t| t.with_timezone(&Local))
+                    .unwrap_or_else(|_| Local::now()),
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
     /// Notes that reference `name`, newest first.
@@ -276,6 +338,7 @@ impl Index {
             self.db.execute("DELETE FROM notes WHERE path = ?1", [path])?;
             self.db.execute("DELETE FROM notes_fts WHERE path = ?1", [path])?;
             self.db.execute("DELETE FROM links WHERE from_path = ?1", [path])?;
+            self.db.execute("DELETE FROM attachments WHERE from_path = ?1", [path])?;
             removed += 1;
         }
         Ok(removed)
@@ -664,6 +727,68 @@ mod tests {
         std::fs::remove_file(dir.join("source.md")).unwrap();
         assert_eq!(ix.sync(&dir).unwrap().removed, 1);
         assert!(ix.backlinks("target").unwrap().is_empty());
+    }
+
+    fn shot_names(shots: Vec<Shot>) -> Vec<String> {
+        shots.into_iter().map(|s| s.name).collect()
+    }
+
+    #[test]
+    fn the_wall_lists_every_picture_newest_note_first() {
+        let (dir, mut ix) = vault_with("wall", &[]);
+        write(&dir, "older", "2026-01-05T10:00:00+01:00", "Older\n![[a.webp]]");
+        write(&dir, "newer", "2026-03-05T10:00:00+01:00", "Newer\n![[b.webp]]\n![[c.webp]]");
+        ix.sync(&dir).unwrap();
+
+        // Newest note first, and within a note the order they were pasted in.
+        assert_eq!(shot_names(ix.wall(50).unwrap()), ["b.webp", "c.webp", "a.webp"]);
+    }
+
+    #[test]
+    fn a_wall_entry_names_the_note_it_came_from() {
+        let (dir, mut ix) = vault_with("wall-note", &[]);
+        write(&dir, "with-a-picture", "2026-01-05T10:00:00+01:00", "With a picture\n![[shot.webp]]");
+        ix.sync(&dir).unwrap();
+
+        let shot = &ix.wall(50).unwrap()[0];
+        assert_eq!(shot.name, "shot.webp");
+        assert_eq!(shot.note_name, "with-a-picture");
+        assert_eq!(shot.title, "With a picture");
+    }
+
+    #[test]
+    fn a_picture_reused_in_two_notes_appears_once() {
+        // The wall is navigated by recognising the picture, so the same image
+        // twice is two identical tiles and one wasted glance. It belongs to the
+        // note most recently written about it.
+        let (dir, mut ix) = vault_with("wall-dedupe", &[]);
+        write(&dir, "first-time", "2026-01-05T10:00:00+01:00", "First time\n![[shot.webp]]");
+        write(&dir, "again-later", "2026-06-05T10:00:00+01:00", "Again later\n![[shot.webp]]");
+        ix.sync(&dir).unwrap();
+
+        let shots = ix.wall(50).unwrap();
+        assert_eq!(shot_names(shots.clone()), ["shot.webp"]);
+        assert_eq!(shots[0].note_name, "again-later");
+    }
+
+    #[test]
+    fn a_note_without_pictures_puts_nothing_on_the_wall() {
+        let (dir, mut ix) = vault_with("wall-empty", &[]);
+        write(&dir, "prose-only", "2026-01-05T10:00:00+01:00", "Prose only\nSee [[somewhere]].");
+        ix.sync(&dir).unwrap();
+        assert!(ix.wall(50).unwrap().is_empty(), "a [[link]] is not a picture");
+    }
+
+    #[test]
+    fn editing_a_note_to_drop_a_picture_drops_it_from_the_wall() {
+        let (dir, mut ix) = vault_with("wall-stale", &[]);
+        write(&dir, "shots", "2026-01-05T10:00:00+01:00", "Shots\n![[a.webp]]\n![[b.webp]]");
+        ix.sync(&dir).unwrap();
+        assert_eq!(ix.wall(50).unwrap().len(), 2);
+
+        write(&dir, "shots", "2026-01-05T10:00:00+01:00", "Shots\n![[a.webp]] and the other one is gone now");
+        assert_eq!(ix.sync(&dir).unwrap().updated, 1);
+        assert_eq!(shot_names(ix.wall(50).unwrap()), ["a.webp"], "a stale picture survived the edit");
     }
 
     #[test]

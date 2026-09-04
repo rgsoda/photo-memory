@@ -182,6 +182,46 @@ pub fn thumbnails(names: Vec<String>) -> CmdResult<Vec<Pasted>> {
         .collect())
 }
 
+/// One tile on the thumbnail wall.
+#[derive(serde::Serialize)]
+pub struct WallItem {
+    name: String,
+    thumb: String,
+    /// The note the picture belongs to, so Enter can open it.
+    path: String,
+    title: String,
+    when: String,
+}
+
+/// Every captured image, newest first.
+///
+/// Tiles whose thumbnail is missing are dropped rather than shown as gaps: the
+/// wall is a way of finding a note by recognising its picture, and a row of
+/// placeholders is nothing to recognise. In the note itself a missing embed is
+/// still shown, because there the filename is the information.
+#[tauri::command]
+pub fn wall(search: State<'_, Search>) -> CmdResult<Vec<WallItem>> {
+    const LIMIT: usize = 500;
+
+    let vault = vault()?;
+    let index = search.0.lock().map_err(|_| "index is poisoned".to_string())?;
+    Ok(index
+        .wall(LIMIT)
+        .map_err(|e| format!("{e:#}"))?
+        .into_iter()
+        .filter_map(|shot| {
+            let bytes = vault.read_thumbnail(&shot.name)?;
+            Some(WallItem {
+                name: shot.name,
+                thumb: data_url(&bytes),
+                path: shot.note.display().to_string(),
+                title: shot.title,
+                when: shot.created.format("%Y-%m-%d").to_string(),
+            })
+        })
+        .collect())
+}
+
 /// A search result as the list renders it.
 #[derive(serde::Serialize)]
 pub struct HitView {

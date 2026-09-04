@@ -119,6 +119,11 @@ impl Note {
     /// produces the first, a note written by hand may carry the second, and a
     /// correction that went unnoticed because it used the other form would
     /// defeat the whole point of making supersession a typed link.
+    /// Attachments this note embeds, in the order they appear.
+    pub fn embeds(&self) -> Vec<String> {
+        crate::links::embeds(&self.body)
+    }
+
     pub fn supersedes(&self) -> Vec<String> {
         let mut out = crate::links::supersedes(&self.body);
         if let Some(declared) = self.extra.get("supersedes") {

@@ -3,8 +3,8 @@
 Fast visual note capture. Hotkey, type, save, gone.
 
 See [DESIGN.md](DESIGN.md) for the format and the plan. Working today: capture, clipboard
-images, full-text search, the read-only viewer, citations between notes, and git sync — on
-Linux and macOS both. Not yet: OCR and a packaged macOS build.
+images, full-text search, the read-only viewer, citations between notes, git sync, and the
+thumbnail wall — on Linux and macOS both. Not yet: OCR and a packaged macOS build.
 
 ## Install
 
@@ -130,7 +130,12 @@ icon and is started by hand. That is the rest of M8.
 | `Ctrl+Enter` | Save and hide |
 | `Esc` | Hide, stashing the text as a draft |
 
-In search: `↑`/`↓` move, `Enter` opens the note read-only, `Esc` goes back.
+In search: `↑`/`↓` move, `Enter` opens the note read-only, `Tab` switches to the thumbnail
+wall, `Esc` goes back.
+
+On the wall — every picture you have ever captured, newest first: arrows move in two
+dimensions, `Enter` opens the note the picture belongs to, `V` opens the picture itself and
+`←`/`→` there step through the whole wall rather than one note, `Esc` returns to search.
 
 In the citation picker: `↑`/`↓` move, `Enter` inserts `[[that-note]]` at the cursor,
 `Ctrl+Enter` inserts it as a `supersedes:` line instead, and `Esc` cancels and leaves the
@@ -199,7 +204,7 @@ and every change to the page appears to do nothing.
 - No tray icon, so the daemon is stopped with `pkill -x photomem`.
 - Images show in a strip under the editor, not inline in the text.
 - Search has no tag or date filters yet.
-- `photomem --help` opens the window instead of printing help.
 - On macOS the app runs but is not packaged: no `.app` bundle, menu bar agent or
   LaunchAgent, and `install.sh` is Linux-only (M8).
-- No sync (M5), OCR (M6).
+- No timeline view yet: the thumbnail wall is built, grouping by day/week/month is not (M7).
+- No OCR (M6).

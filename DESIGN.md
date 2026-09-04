@@ -444,7 +444,16 @@ guess.
 
 **M6 — OCR.** tesseract on paste, OCR text into the index. *The differentiator.*
 
-**M7 — Browsing.** Timeline grouping and the thumbnail wall.
+**M7 — Browsing.** Timeline grouping and the thumbnail wall. The wall is done; the
+timeline is not.
+The index grew an `attachments` table, populated from `![[name]]` exactly as `links` is from
+`[[name]]` — schema version 2, so an existing index is thrown away and rebuilt rather than
+left with an empty table it would never fill. One row per *picture*, not per embed: the same
+screenshot pasted into two notes is one thing you would recognise, and it belongs to the note
+most recently written about it. Tiles with no thumbnail on disk are dropped rather than shown
+as gaps — a wall is for recognising pictures, and a placeholder is nothing to recognise,
+which is the opposite of the rule inside a note, where a missing embed still shows its
+filename because there the filename is the information.
 
 **M8 — macOS.** Platform module, menu bar agent, hotkey, LaunchAgent, packaging.
 

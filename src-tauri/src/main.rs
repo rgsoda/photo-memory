@@ -84,6 +84,7 @@ fn main() {
             commands::paste_image,
             commands::thumbnails,
             commands::search,
+            commands::wall,
             commands::open_note,
             commands::open_link,
             commands::read_image,

@@ -14,6 +14,7 @@ const panes = {
   capture: document.getElementById("capture"),
   search: document.getElementById("search"),
   viewer: document.getElementById("viewer"),
+  wall: document.getElementById("wall"),
 };
 
 /** Matches the `![[name]]` embeds the app writes into a note. */
@@ -33,8 +34,9 @@ const CONFIRM_MS = 450;
 
 const HINTS = {
   capture: "<kbd>Ctrl</kbd><kbd>↵</kbd> save &nbsp; <kbd>//</kbd> search &amp; cite &nbsp; <kbd>Esc</kbd> dismiss",
-  search: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>Esc</kbd> back",
+  search: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>Tab</kbd> wall &nbsp; <kbd>Esc</kbd> back",
   viewer: "<kbd>↑</kbd><kbd>↓</kbd> scroll &nbsp; <kbd>Tab</kbd><kbd>↵</kbd> link &nbsp; <kbd>V</kbd> image &nbsp; <kbd>Esc</kbd> back",
+  wall: "<kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> open note &nbsp; <kbd>V</kbd> image &nbsp; <kbd>Esc</kbd> back",
   pick: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> cite &nbsp; <kbd>Ctrl</kbd><kbd>↵</kbd> supersedes &nbsp; <kbd>Esc</kbd> cancel",
 };
 
@@ -48,6 +50,9 @@ let gallery = [];
  * the chosen reference replaces. Null in every other mode.
  */
 let pick = null;
+/** Tiles on the thumbnail wall, and which one is under the cursor. */
+let shots = [];
+let shot = 0;
 let draftTimer = null;
 let searchTimer = null;
 let statusTimer = null;
@@ -212,6 +217,91 @@ function closeSearch() {
   pick = null;
   setMode("capture");
   focusEditor();
+}
+
+/* ── the thumbnail wall ──────────────────────────────────────────────────── */
+
+async function openWall() {
+  setMode("wall");
+  panes.wall.replaceChildren();
+  try {
+    shots = await invoke("wall");
+  } catch (e) {
+    shots = [];
+    setStatus(String(e), "error");
+  }
+  shot = 0;
+  renderWall();
+  panes.wall.scrollTop = 0;
+}
+
+function renderWall() {
+  if (!shots.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "No pictures captured yet.";
+    panes.wall.replaceChildren(empty);
+    return;
+  }
+
+  panes.wall.replaceChildren(
+    ...shots.map((s, i) => {
+      const tile = document.createElement("figure");
+      tile.setAttribute("aria-selected", String(i === shot));
+
+      const img = document.createElement("img");
+      img.src = s.thumb;
+      img.alt = s.name;
+      tile.append(img);
+
+      const caption = document.createElement("figcaption");
+      caption.textContent = s.title;
+      caption.title = `${s.title} — ${s.when}`;
+      tile.append(caption);
+
+      // A click is a shortcut for "select this and open its note", which is
+      // what Enter does — the mouse should not be able to do something the
+      // keyboard cannot.
+      tile.addEventListener("click", () => {
+        shot = i;
+        openShotNote();
+      });
+      return tile;
+    })
+  );
+  panes.wall.children[shot]?.scrollIntoView({ block: "nearest" });
+}
+
+/**
+ * How many tiles sit on one row, read back from the layout.
+ *
+ * The grid reflows with the window, so the column count is a fact about the
+ * rendered page rather than a constant to keep in step with the CSS.
+ */
+function wallColumns() {
+  const tiles = panes.wall.children;
+  if (tiles.length < 2) return 1;
+  const top = tiles[0].offsetTop;
+  let n = 1;
+  while (n < tiles.length && tiles[n].offsetTop === top) n += 1;
+  return n;
+}
+
+function moveShot(delta) {
+  if (!shots.length) return;
+  shot = Math.min(Math.max(shot + delta, 0), shots.length - 1);
+  renderWall();
+}
+
+/** Open the note the selected picture belongs to. */
+async function openShotNote() {
+  const s = shots[shot];
+  if (!s) return;
+  try {
+    showNote(await invoke("open_note", { path: s.path }));
+  } catch (e) {
+    setStatus(String(e), "error");
+  }
 }
 
 /* ── citing another note ─────────────────────────────────────────────────── */
@@ -563,6 +653,12 @@ query.addEventListener("keydown", (e) => {
       if (pick) cite(e.ctrlKey || e.metaKey);
       else openSelected();
       break;
+    case "Tab":
+      // Not from the picker: there, you are part-way through writing a note.
+      if (pick) break;
+      e.preventDefault();
+      openWall();
+      break;
     case "Escape":
       e.preventDefault();
       if (pick) cancelPicker();
@@ -573,6 +669,7 @@ query.addEventListener("keydown", (e) => {
 
 // The viewer has no input of its own, so its keys are caught on the way up.
 document.addEventListener("keydown", (e) => {
+  if (mode === "wall") return wallKey(e);
   if (mode !== "viewer") return;
 
   const step = scrollStep(e);
@@ -591,6 +688,33 @@ document.addEventListener("keydown", (e) => {
     openImage(gallery[0], gallery);
   }
 });
+
+/** The wall is a grid, so it moves in two dimensions. */
+function wallKey(e) {
+  const columns = wallColumns();
+  const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: columns, ArrowUp: -columns }[e.key];
+  if (step !== undefined) {
+    e.preventDefault();
+    return moveShot(step);
+  }
+  switch (e.key) {
+    case "Enter":
+      e.preventDefault();
+      return openShotNote();
+    case "v":
+      e.preventDefault();
+      // Every picture on the wall, so the arrows keep working in the image
+      // window — the wall is the one place where stepping through everything
+      // captured is the obvious thing to want.
+      if (shots.length) openImage(shots[shot].name, shots.map((s) => s.name));
+      return;
+    case "Escape":
+      e.preventDefault();
+      setMode("search");
+      query.focus();
+      return;
+  }
+}
 
 // Focus returns to the window without the page being told which element should
 // have it — after the image window closes, or after a click on the frame. The

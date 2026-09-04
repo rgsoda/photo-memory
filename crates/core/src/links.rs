@@ -47,6 +47,27 @@ pub fn links(body: &str) -> Vec<String> {
     collect(body, false)
 }
 
+/// Attachments this body embeds as `![[name]]`, in order, without duplicates.
+///
+/// The mirror image of `links`: same syntax, opposite answer to the leading
+/// `!`. Kept here rather than beside the viewer so that one reading of `[[`
+/// serves the index, the viewer and the thumbnail wall alike.
+pub fn embeds(body: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (i, _) in body.match_indices("![[") {
+        let rest = &body[i + 3..];
+        let Some(end) = rest.find("]]") else { continue };
+        let name = rest[..end].trim();
+        if name.is_empty() || name.contains(['[', ']', '\n']) {
+            continue;
+        }
+        if !out.iter().any(|n| n == name) {
+            out.push(name.to_string());
+        }
+    }
+    out
+}
+
 /// Notes this body declares itself to supersede.
 pub fn supersedes(body: &str) -> Vec<String> {
     collect(body, true)
@@ -111,6 +132,20 @@ mod tests {
         assert!(links("[[never closed").is_empty());
         assert!(links("[[]]").is_empty());
         assert!(links("[[ ]]").is_empty());
+    }
+
+    #[test]
+    fn embeds_are_the_mirror_image_of_links() {
+        let body = "Title\n![[one.webp]]\nprose [[a-note]] more\n![[two.webp]]\n![[one.webp]]";
+        assert_eq!(embeds(body), vec!["one.webp", "two.webp"]);
+        assert_eq!(links(body), vec!["a-note"]);
+    }
+
+    #[test]
+    fn a_note_with_no_pictures_embeds_nothing() {
+        assert!(embeds("Just a title\n\nand [[a-link]]").is_empty());
+        assert!(embeds("![[").is_empty());
+        assert!(embeds("![[]]").is_empty());
     }
 
     #[test]
