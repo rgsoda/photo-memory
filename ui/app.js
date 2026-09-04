@@ -32,7 +32,7 @@ const CONFIRM_MS = 450;
 const HINTS = {
   capture: "<kbd>Ctrl</kbd><kbd>↵</kbd> save &nbsp; <kbd>//</kbd> search &amp; cite &nbsp; <kbd>Esc</kbd> dismiss",
   search: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>Esc</kbd> back",
-  viewer: "<kbd>Tab</kbd><kbd>↵</kbd> follow link &nbsp; <kbd>V</kbd> view image &nbsp; <kbd>Esc</kbd> back to results",
+  viewer: "<kbd>↑</kbd><kbd>↓</kbd> scroll &nbsp; <kbd>Tab</kbd><kbd>↵</kbd> link &nbsp; <kbd>V</kbd> image &nbsp; <kbd>Esc</kbd> back",
   pick: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> cite &nbsp; <kbd>Ctrl</kbd><kbd>↵</kbd> supersedes &nbsp; <kbd>Esc</kbd> cancel",
 };
 
@@ -368,6 +368,44 @@ async function openSelected() {
 
 /* ── viewer ──────────────────────────────────────────────────────────────── */
 
+/** One arrow-key press of scrolling: a few lines, not one pixel. */
+const LINE = 60;
+
+/**
+ * How far this key should scroll the open note, or null if it is not a scroll
+ * key.
+ *
+ * The pane is scrolled explicitly rather than by focusing it and leaving this
+ * to the browser: a `<section>` takes no focus of its own, and the moment a
+ * `[[link]]` inside it is tabbed to, the focus that native scrolling depends on
+ * belongs to the link instead.
+ */
+function scrollStep(e) {
+  if (e.ctrlKey || e.altKey || e.metaKey) return null;
+  const page = panes.viewer.clientHeight - LINE;
+  switch (e.key) {
+    case "ArrowDown":
+    case "j":
+      return LINE;
+    case "ArrowUp":
+    case "k":
+      return -LINE;
+    case "PageDown":
+    case " ":
+      return page;
+    case "PageUp":
+      return -page;
+    // Home and End are absolute, so they are expressed as a step big enough to
+    // reach either end whatever the note's length.
+    case "Home":
+      return -panes.viewer.scrollHeight;
+    case "End":
+      return panes.viewer.scrollHeight;
+    default:
+      return null;
+  }
+}
+
 /** Follow a `[[link]]` to the note it names. */
 async function openLink(name) {
   try {
@@ -418,7 +456,7 @@ function showNote(note) {
     .replaceChildren(...note.images.map((i) => thumbFor(i.name, i.thumb, gallery)));
 
   setMode("viewer");
-  panes.viewer.focus();
+  panes.viewer.scrollTop = 0;
 }
 
 /* ── keys ────────────────────────────────────────────────────────────────── */
@@ -492,6 +530,14 @@ query.addEventListener("keydown", (e) => {
 // The viewer has no input of its own, so its keys are caught on the way up.
 document.addEventListener("keydown", (e) => {
   if (mode !== "viewer") return;
+
+  const step = scrollStep(e);
+  if (step !== null) {
+    e.preventDefault();
+    panes.viewer.scrollBy({ top: step, behavior: "instant" });
+    return;
+  }
+
   if (e.key === "Escape") {
     e.preventDefault();
     setMode("search");

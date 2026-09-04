@@ -115,7 +115,9 @@ literal `//` behind. A trigger only fires at the start of a word, so `https://` 
 
 Citations render as links in the read-only view: `Tab` reaches them and `Enter` follows.
 
-In a note: `V` opens its image in its own window, as does clicking any thumbnail. That
+In a note: `↑`/`↓` (or `j`/`k`) scroll a line, `PageUp`/`PageDown` and `Space` scroll a
+screen, `Home`/`End` jump to either end, and `Tab` reaches its `[[links]]` with `Enter` to
+follow. `V` opens its image in its own window, as does clicking any thumbnail. That
 window is always 1600px on its long edge in the image's aspect ratio, so a full-screen
 capture opens at its own size and a smaller image is scaled up into the same frame. `Z` (or
 a click) toggles fit and 1:1, centred either way — drag to pan when it overflows — `←`/`→`
