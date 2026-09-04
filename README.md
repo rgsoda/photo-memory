@@ -185,11 +185,25 @@ libappindicator needs ayatana-appindicator3 installed; ksni needs nothing.
 Omarchy's bar keeps the tray collapsed behind the `<` chevron on the right; the icon is in
 there.
 
-The artwork is `src-tauri/icons/tray/photomem.svg`, drawn on a 16-unit grid because 16px is
-the size that has to survive. `render.sh` produces the two PNGs the binary embeds: black
-for macOS, which treats it as a template image and recolours it to match the menu bar, and
-white for Linux, where nothing recolours anything and the icon has to arrive the right
-colour for the bar. Edit the SVG, run the script, commit both.
+## Icons
+
+Two drawings, in `src-tauri/icons/`. `tray/photomem.svg` is the status bar glyph, on a
+16-unit grid because 16px is the size that has to survive. `photomem.svg` is the app icon:
+the same mark given a ground and a container, on Apple's 1024 grid with an 824 tile so it
+sits at the same visual size as stock macOS icons rather than looming over them.
+
+`icons/render.sh` produces everything either one needs — edit an SVG, run the script,
+commit the output. The PNGs are committed because the binary embeds them and a build
+machine should not need a renderer.
+
+The tray glyph renders twice on purpose: black for macOS, which treats it as a template
+image and recolours it to match the menu bar, and white for Linux, where nothing recolours
+anything and the pixmap has to arrive already the right colour. The app icon is white on
+blue rather than blue on ink because at 16px the low-contrast version turns into a smudge.
+
+`icon.icns` is assembled by the script rather than by `iconutil`, which is macOS-only —
+modern .icns entries are PNGs with a four-byte type in front. It has been checked
+structurally but never opened by Finder.
 
 ## Keys
 
