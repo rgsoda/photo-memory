@@ -174,10 +174,16 @@ cannot reach when you have forgotten the binding, and cannot quit. The tray icon
 daemon's entire visible surface: **left click captures**, right click opens a menu with
 *New note* and *Quit photomem*.
 
-On Linux the click does nothing — the StatusNotifierItem hosts reached through
-libappindicator deliver no click events at all — so the menu is the whole interaction
-there, which is why *New note* is in it rather than being click-only. Omarchy's bar keeps
-the tray collapsed behind the `<` chevron on the right; the icon is in there.
+This works the same on both, which took two implementations. Tauri's tray goes through
+libappindicator on Linux, and libappindicator exports a StatusNotifierItem `Activate`
+method with nothing registered behind it: a left click reaches the process and dies there
+with "no handler for Activate". The bar is doing its part — there is simply nothing
+listening. So Linux talks StatusNotifierItem directly, through ksni, and handles `Activate`
+itself. That also drops a system dependency the build had quietly acquired, since linking
+libappindicator needs ayatana-appindicator3 installed; ksni needs nothing.
+
+Omarchy's bar keeps the tray collapsed behind the `<` chevron on the right; the icon is in
+there.
 
 The artwork is `src-tauri/icons/tray/photomem.svg`, drawn on a 16-unit grid because 16px is
 the size that has to survive. `render.sh` produces the two PNGs the binary embeds: black

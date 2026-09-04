@@ -18,16 +18,22 @@ serde.workspace = true
 base64 = "0.22"
 serde_json = "1"
 anyhow.workspace = true
-# tray-icon puts photomem in the status bar; image-png is what lets the icon
-# be a PNG rather than raw RGBA typed out at compile time.
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# image-png is what lets the tray icon be a PNG rather than raw RGBA typed out
+# at compile time. The tray itself is per-platform, below.
+tauri = { version = "2", features = ["image-png"] }
 tauri-plugin-single-instance = "2"
 
 # Reading an image off the clipboard is the one thing that differs by platform.
 # `wayland-data-control` is a Linux-only backend, so it is scoped here rather
 # than asked for everywhere and quietly ignored.
+#
+# ksni is the status bar icon, spoken as StatusNotifierItem directly. Tauri's
+# own tray goes through libappindicator here, which answers a left click with
+# "no handler for Activate" and needs ayatana-appindicator3 installed to link
+# at all. This needs nothing installed and makes left click work.
 [target.'cfg(target_os = "linux")'.dependencies]
 arboard = { version = "3", default-features = false, features = ["wayland-data-control", "image-data"] }
+ksni = { version = "0.3", features = ["blocking"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 arboard = { version = "3", default-features = false, features = ["image-data"] }
@@ -37,3 +43,4 @@ arboard = { version = "3", default-features = false, features = ["image-data"] }
 # would be dead weight in that binary.
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri-plugin-global-shortcut = "2"
+tauri = { version = "2", features = ["tray-icon"] }
