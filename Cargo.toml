@@ -24,3 +24,18 @@ serde = { version = "1", features = ["derive"] }
 strip = true
 lto = true
 codegen-units = 1
+
+# The same optimisations without the two settings that make a release build
+# serial: fat LTO is one long single-threaded link of the whole program, and
+# codegen-units = 1 gives up all parallelism inside a crate. Both earn their
+# place in a shipped binary and neither earns it in a rebuild loop.
+#
+#   cargo build --profile quick     # then run target/quick/photomem
+#
+# Bigger binary, same behaviour.
+[profile.quick]
+inherits = "release"
+lto = false
+codegen-units = 16
+strip = false
+incremental = true

@@ -256,6 +256,18 @@ The UI is embedded in the binary at build time. `src-tauri/build.rs` declares `u
 build input, without which cargo happily relinks the old frontend into a "rebuilt" binary
 and every change to the page appears to do nothing.
 
+Build with `--profile quick` while iterating:
+
+```bash
+cargo build --profile quick && ./target/quick/photomem capture
+```
+
+`release` sets `lto = true` and `codegen-units = 1` to get the binary from 20 MB to 11 MB.
+Both are worth it in a shipped binary and neither is worth it in a rebuild loop: they are
+the two settings that make a build serial, so a one-line change costs 111s under `release`
+and 10s under `quick` on the same sixteen threads. `cargo check` is a second, if all you
+need is whether it compiles.
+
 ## Not there yet
 
 - No tray icon, so the daemon is stopped with `pkill -x photomem`.
