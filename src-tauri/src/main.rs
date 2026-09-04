@@ -17,17 +17,51 @@ use tauri::{Emitter, Manager, WebviewWindow};
 enum Mode {
     Window,
     Daemon,
+    /// Print usage and exit. Anything that looks like a request for help is
+    /// this: `--help` opening a window instead of answering would be a rude
+    /// surprise, and the first thing anyone types at an unfamiliar binary.
+    Help,
+    /// Print the version and exit.
+    Version,
 }
 
+const USAGE: &str = "\
+photomem — fast visual note capture
+
+USAGE:
+    photomem            open the capture window
+    photomem capture    wake the running instance, or open one
+    photomem daemon     start hidden and stay warm for the hotkey
+
+OPTIONS:
+    -h, --help          print this
+    -V, --version       print the version
+
+Configuration lives in ~/.config/photomem/config.toml.
+The hotkey is a compositor binding on Linux; see the README.";
+
 fn mode_from(args: impl Iterator<Item = String>) -> Mode {
-    match args.skip(1).find(|a| !a.starts_with('-')).as_deref() {
-        Some("daemon") => Mode::Daemon,
-        _ => Mode::Window,
+    let mut mode = Mode::Window;
+    for arg in args.skip(1) {
+        match arg.as_str() {
+            "-h" | "--help" | "help" => return Mode::Help,
+            "-V" | "--version" | "version" => return Mode::Version,
+            "daemon" => mode = Mode::Daemon,
+            _ => {}
+        }
     }
+    mode
 }
 
 fn main() {
     let mode = mode_from(std::env::args());
+
+    // Before the Tauri builder, so neither of these starts a GUI runtime.
+    match mode {
+        Mode::Help => return println!("{USAGE}"),
+        Mode::Version => return println!("photomem {}", env!("CARGO_PKG_VERSION")),
+        _ => {}
+    }
 
     let builder = tauri::Builder::default()
         // A second `photomem capture` must not start a second app. It wakes this
@@ -140,6 +174,10 @@ fn present(window: &WebviewWindow) {
     // behind an `invoke` that could quietly not happen.
     commands::refresh_index(window.app_handle());
 
+    // Notes captured on the other machine arrive here. Off the UI thread: the
+    // window must appear now, not after a network round trip.
+    commands::pull_in_background(window.app_handle());
+
     let _ = window.emit("photomem://present", ());
 }
 
@@ -151,6 +189,8 @@ mod tests {
         match mode_from(args.iter().map(|s| s.to_string())) {
             Mode::Window => "window",
             Mode::Daemon => "daemon",
+            Mode::Help => "help",
+            Mode::Version => "version",
         }
     }
 
@@ -166,5 +206,24 @@ mod tests {
     #[test]
     fn ignores_leading_flags() {
         assert_eq!(mode(&["photomem", "--verbose", "daemon"]), "daemon");
+    }
+
+    #[test]
+    fn help_and_version_never_open_a_window() {
+        for spelling in ["-h", "--help", "help"] {
+            assert_eq!(mode(&["photomem", spelling]), "help", "{spelling}");
+        }
+        for spelling in ["-V", "--version", "version"] {
+            assert_eq!(mode(&["photomem", spelling]), "version", "{spelling}");
+        }
+        // Even alongside a real mode: asking for help wins over doing the thing.
+        assert_eq!(mode(&["photomem", "daemon", "--help"]), "help");
+    }
+
+    #[test]
+    fn usage_names_every_mode() {
+        for word in ["capture", "daemon", "--help", "--version"] {
+            assert!(USAGE.contains(word), "usage does not mention {word}");
+        }
     }
 }

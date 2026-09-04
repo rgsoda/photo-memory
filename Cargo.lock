@@ -2714,6 +2714,7 @@ dependencies = [
  "photomem-images",
  "photomem-index",
  "photomem-store",
+ "photomem-sync",
  "serde",
  "serde_json",
  "tauri",
@@ -2767,6 +2768,13 @@ dependencies = [
  "anyhow",
  "photomem-core",
  "photomem-images",
+]
+
+[[package]]
+name = "photomem-sync"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
 ]
 
 [[package]]

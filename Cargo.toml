@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/config", "crates/store", "crates/images", "crates/index", "src-tauri"]
+members = ["crates/core", "crates/config", "crates/store", "crates/images", "crates/index", "crates/sync", "src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,6 +13,7 @@ photomem-config = { path = "crates/config" }
 photomem-store = { path = "crates/store" }
 photomem-images = { path = "crates/images" }
 photomem-index = { path = "crates/index" }
+photomem-sync = { path = "crates/sync" }
 anyhow = "1"
 chrono = "0.4"
 serde = { version = "1", features = ["derive"] }

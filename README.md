@@ -3,8 +3,8 @@
 Fast visual note capture. Hotkey, type, save, gone.
 
 See [DESIGN.md](DESIGN.md) for the format and the plan. Working today: capture, clipboard
-images, full-text search, the read-only viewer, and citations between notes — on Linux and
-macOS both. Not yet: sync, OCR, and a packaged macOS build.
+images, full-text search, the read-only viewer, citations between notes, and git sync — on
+Linux and macOS both. Not yet: OCR and a packaged macOS build.
 
 ## Install
 
@@ -48,6 +48,12 @@ vault = "/home/you/photomem"
 # The global capture hotkey. macOS only — on Linux this is a compositor binding.
 # Modifiers: Ctrl, Alt, Shift, Cmd (or Super). Takes effect on restart.
 hotkey = "Ctrl+Alt+N"
+
+[sync]
+# Commit each saved note to the vault's git repo, and push it if that repo has
+# a remote. Does nothing until the vault is a git repo, so `git init` there is
+# what actually turns sync on.
+enabled = true
 
 [image]
 # Pasted images are scaled to this long edge and re-encoded as WebP. Measured on

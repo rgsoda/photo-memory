@@ -17,6 +17,7 @@ pub struct Config {
     /// owns the binding, because Wayland has no protocol for an app to register
     /// one. See DESIGN.md §7.
     pub hotkey: String,
+    pub sync: SyncConfig,
     pub image: ImageConfig,
 }
 
@@ -32,8 +33,26 @@ impl Default for Config {
         Config {
             vault: home().join("photomem"),
             hotkey: DEFAULT_HOTKEY.to_string(),
+            sync: SyncConfig::default(),
             image: ImageConfig::default(),
         }
+    }
+}
+
+/// Whether saving a note also commits it.
+///
+/// On by default, but it only does anything once the vault is a git repo —
+/// which is the user running `git init`, not a setting. That makes the default
+/// safe: it cannot surprise someone who never asked for version control.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct SyncConfig {
+    pub enabled: bool,
+}
+
+impl Default for SyncConfig {
+    fn default() -> Self {
+        SyncConfig { enabled: true }
     }
 }
 
@@ -80,6 +99,12 @@ vault = \"{vault}\"
 # Modifiers: Ctrl, Alt, Shift, Cmd (or Super). Takes effect on restart.
 hotkey = \"{hotkey}\"
 
+[sync]
+# Commit each saved note to the vault's git repo, and push it if that repo has
+# a remote. Does nothing until the vault is a git repo, so `git init` there is
+# what actually turns sync on.
+enabled = {sync_enabled}
+
 [image]
 # Pasted images are scaled to this long edge and re-encoded as WebP. Measured on
 # a 4K screenshot: 1200 is 62 KB but too soft to read, 1600 is 104 KB and legible,
@@ -118,6 +143,7 @@ impl Config {
         let body = TEMPLATE
             .replace("{vault}", &self.vault.display().to_string())
             .replace("{hotkey}", &self.hotkey)
+            .replace("{sync_enabled}", &self.sync.enabled.to_string())
             .replace("{max_edge}", &self.image.max_edge.to_string())
             .replace("{thumb_edge}", &self.image.thumb_edge.to_string())
             .replace("{quality}", &self.image.quality.to_string());
@@ -202,6 +228,18 @@ mod tests {
 
         std::fs::write(&path, "hotkey = \"Cmd+Shift+Space\"\n").unwrap();
         assert_eq!(Config::load_from(&path).unwrap().hotkey, "Cmd+Shift+Space");
+    }
+
+    #[test]
+    fn sync_is_on_by_default_and_can_be_turned_off() {
+        let path = tmpdir("sync").join("config.toml");
+
+        // A config written before this section existed must still load.
+        std::fs::write(&path, "vault = \"~/notes\"\n").unwrap();
+        assert!(Config::load_from(&path).unwrap().sync.enabled);
+
+        std::fs::write(&path, "[sync]\nenabled = false\n").unwrap();
+        assert!(!Config::load_from(&path).unwrap().sync.enabled);
     }
 
     #[test]

@@ -426,8 +426,21 @@ upgrade would ever acquire a link. `supersedes` is read from a body line *and* t
 frontmatter key §2 documents, since the picker writes the first and a hand-edited note may
 carry the second.
 
-**M5 — Sync.** git pull/commit/push, tray status, conflict handling.
+**M5 — Sync.** git pull/commit/push, tray status, conflict handling. Done, less the tray.
 *Usable: it works on two machines.*
+Driving the `git` binary rather than linking libgit2, because the vault is a repo the user
+owns and sometimes fixes by hand: sync has to honour the same SSH keys, credential helpers
+and `commit.gpgsign` their own commands do. One commit per save, named after the note, so
+the history reads as a list of captures. Both directions run on a thread — a capture must
+never wait on the network — behind one lock, since a save landing during a pull would
+otherwise be two `git` processes fighting over one `index.lock`.
+
+**Conflicts barely exist here, by construction.** Notes are append-only and named for their
+own timestamp and slug, so two machines capturing at once touch different files; `pull
+--rebase --autostash` merges them without a merge commit. A test covers exactly that case.
+What is left is a genuine edit of the same file on two machines, which the UI cannot even
+produce — and there the right answer is to stop and let the user resolve it in git, not to
+guess.
 
 **M6 — OCR.** tesseract on paste, OCR text into the index. *The differentiator.*
 

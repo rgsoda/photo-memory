@@ -600,6 +600,12 @@ window.addEventListener("focus", () => {
   else if (mode === "capture") focusEditor();
 });
 
+// Sync runs on its own thread and finishes whenever it finishes — usually after
+// the window has already hidden itself, which is why the backend also logs it.
+listen("photomem://sync", ({ payload: [text, failed] }) => {
+  setStatus(text, failed ? "error" : "saved");
+});
+
 // The window is reused rather than recreated, so every hotkey press after the
 // first arrives as this event instead of a page load.
 listen("photomem://present", () => {

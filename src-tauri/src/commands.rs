@@ -23,12 +23,84 @@ fn vault() -> CmdResult<Vault> {
 /// Save the buffer as a new note and clear the draft. Returns the path, which
 /// the UI shows briefly as confirmation that it went somewhere real.
 #[tauri::command]
-pub fn save_note(body: String) -> CmdResult<String> {
+pub fn save_note<R: Runtime>(app: tauri::AppHandle<R>, body: String) -> CmdResult<String> {
     let note = Note::new(&body).map_err(|e| e.to_string())?;
     let vault = vault()?;
     let path = vault.save(&note).map_err(|e| format!("{e:#}"))?;
     vault.clear_draft().map_err(|e| format!("{e:#}"))?;
+
+    // Only after the note is safely on disk. Sync is a convenience; the capture
+    // is the thing that must not be lost, and it now cannot be.
+    commit_in_background(&app, note.title().to_string());
     Ok(path.display().to_string())
+}
+
+/// Commit and push the just-saved note, off the UI thread.
+///
+/// The window closes a few hundred milliseconds after a save, and a push to a
+/// slow remote takes longer than that. Doing this inline would make every
+/// capture wait on the network — which is the one thing the design says capture
+/// must never do.
+fn commit_in_background<R: Runtime>(app: &tauri::AppHandle<R>, title: String) {
+    let Some(repo) = sync_repo() else { return };
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let _guard = git_lock().lock();
+        let message = photomem_sync::message_for(&title);
+        match repo.save(&message) {
+            Ok(photomem_sync::Synced::Nothing) => {}
+            Ok(photomem_sync::Synced::Committed) => report(&app, "committed", false),
+            Ok(photomem_sync::Synced::Pushed) => report(&app, "synced", false),
+            Err(e) => report(&app, &format!("sync failed: {e:#}"), true),
+        }
+    });
+}
+
+/// Pull anything captured on another machine, off the UI thread.
+///
+/// Fired when the window is presented, because that is when the notes are about
+/// to be read. It cannot block the window appearing, so the index is refreshed
+/// afterwards and the page told to redraw if anything actually arrived.
+pub fn pull_in_background<R: Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(repo) = sync_repo() else { return };
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let _guard = git_lock().lock();
+        match repo.pull() {
+            Ok(false) => {}
+            Ok(true) => {
+                refresh_index(&app);
+                report(&app, "pulled new notes", false);
+            }
+            Err(e) => report(&app, &format!("pull failed: {e:#}"), true),
+        }
+    });
+}
+
+/// The vault as a git repo, if sync is on and it is one.
+fn sync_repo() -> Option<photomem_sync::Repo> {
+    let cfg = Config::load().ok()?;
+    cfg.sync.enabled.then_some(())?;
+    photomem_sync::Repo::open(&cfg.vault)
+}
+
+/// Serialises git across threads.
+///
+/// A save while a pull is still running would otherwise leave two `git`
+/// processes fighting over one index.lock, and the loser reports a failure that
+/// is really just a race.
+fn git_lock() -> &'static Mutex<()> {
+    static LOCK: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+/// Tell the page what sync did. Also to stderr, since the window is usually
+/// gone by the time a push finishes.
+fn report<R: Runtime>(app: &tauri::AppHandle<R>, text: &str, is_error: bool) {
+    if is_error {
+        eprintln!("photomem: {text}");
+    }
+    let _ = app.emit("photomem://sync", (text, is_error));
 }
 
 #[tauri::command]

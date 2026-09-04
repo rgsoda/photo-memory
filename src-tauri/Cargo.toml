@@ -12,6 +12,7 @@ photomem-config.workspace = true
 photomem-store.workspace = true
 photomem-images.workspace = true
 photomem-index.workspace = true
+photomem-sync.workspace = true
 chrono.workspace = true
 serde.workspace = true
 base64 = "0.22"
