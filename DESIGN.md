@@ -173,8 +173,8 @@ Tables: `notes` (id, path, title, created, modified, body), `tags` (note_id, tag
 `links` (from_id, to_id — backlinks are this table read backwards), `attachments`
 (note_id, file, ocr_text), and an FTS5 virtual table over title + body + OCR text.
 
-**The index is refreshed by scanning, not watching.** When the window is presented, the
-notes directory is walked and any file whose mtime or size differs from the indexed copy is
+**The index is refreshed by scanning, not watching**, from the Rust side of `present`
+rather than by the page. When the window is presented, the notes directory is walked and any file whose mtime or size differs from the indexed copy is
 re-read. A scan of a few thousand files costs milliseconds — less than the window takes to
 appear — and unlike a watcher it cannot miss an event, leak a thread, or fall out of step
 after a `git pull` rewrites files underneath it. A full rebuild from a cold directory is a
@@ -290,8 +290,10 @@ capture strip — opens the picture in a **separate window sized to the picture*
 `max_edge` (1600px) on its long side, in the image's own aspect ratio. Images are stored
 capped at that, so a full-screen capture opens at exactly its own size, and a smaller one is
 scaled up into the same frame rather than the window shrinking and growing as you step
-through a note. `Z` or a click toggles fit and 1:1 with drag-to-pan; `←`/`→` step through
-the note's images; `Esc` closes it and leaves the capture window as it was.
+through a note. `Z` or a click toggles fit and 1:1; `←`/`→` step through the note's images; `Esc` closes it
+and leaves the capture window as it was. At 1:1 the image stays centred — an image smaller
+than its window belongs in the middle, not in a corner — and when it does overflow, the
+pane starts scrolled to the centre and drags to pan.
 
 A separate window, because reading the text in a captured Slack thread is the entire point
 of keeping the picture, and a 1600px image scaled into a 720px capture window is no more

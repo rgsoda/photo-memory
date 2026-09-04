@@ -330,9 +330,7 @@ listen("photomem://present", () => {
   invoke("close_image").catch(() => {});
   setMode("capture");
   restoreDraft();
-  invoke("refresh").catch(() => {});
 });
 
 setMode("capture");
 restoreDraft();
-invoke("refresh").catch((e) => setStatus(String(e), "error"));

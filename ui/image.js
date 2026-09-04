@@ -31,7 +31,11 @@ function setZoom(on) {
   zoomed = on;
   document.body.classList.toggle("zoomed", on);
   hints.innerHTML = on ? HINTS.zoomed : HINTS.fit;
-  if (!on) pane.scrollTo(0, 0);
+
+  if (!on) return pane.scrollTo(0, 0);
+  // When 1:1 does overflow, start in the middle rather than at a corner: the
+  // interesting part of a screenshot is rarely its top-left pixel.
+  pane.scrollTo((pane.scrollWidth - pane.clientWidth) / 2, (pane.scrollHeight - pane.clientHeight) / 2);
 }
 
 async function show(index) {

@@ -120,17 +120,25 @@ pub struct HitView {
     snippet: String,
 }
 
-/// Bring the index in line with the notes on disk.
+/// Sync the index with the notes directory, reporting failure to stderr.
 ///
-/// Called when the window is presented rather than on a timer: notes change
-/// while the window is closed, and a scan of a few thousand files is faster
-/// than the window takes to appear.
-#[tauri::command]
-pub fn refresh(search: State<'_, Search>) -> CmdResult<usize> {
-    let vault = vault()?;
-    let mut index = search.0.lock().map_err(|_| "index is poisoned".to_string())?;
-    index.sync(&vault.notes_dir()).map_err(|e| format!("{e:#}"))?;
-    Ok(index.len())
+/// Nothing the caller can do about a failure except carry on with a stale
+/// index, which is better than refusing to show the window.
+pub fn refresh_index<R: Runtime>(app: &tauri::AppHandle<R>) {
+    let Ok(vault) = vault() else {
+        eprintln!("photomem: cannot locate the vault; index not refreshed");
+        return;
+    };
+    let state = app.state::<Search>();
+    let Ok(mut index) = state.0.lock() else {
+        eprintln!("photomem: index lock poisoned; not refreshed");
+        return;
+    };
+    match index.sync(&vault.notes_dir()) {
+        Ok(stats) if stats.changed() => eprintln!("photomem: index {stats:?}"),
+        Ok(_) => {}
+        Err(e) => eprintln!("photomem: index sync failed: {e:#}"),
+    }
 }
 
 #[tauri::command]

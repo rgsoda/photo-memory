@@ -44,7 +44,6 @@ fn main() {
             commands::dismiss,
             commands::paste_image,
             commands::thumbnails,
-            commands::refresh,
             commands::search,
             commands::open_note,
             commands::read_image,
@@ -87,6 +86,13 @@ fn present(window: &WebviewWindow) {
     let _ = window.show();
     let _ = window.center();
     let _ = window.set_focus();
+
+    // Bring the index up to date here rather than asking the page to do it:
+    // notes change while the window is closed, and this is the moment they are
+    // about to be searched. Doing it in the frontend put a backend concern
+    // behind an `invoke` that could quietly not happen.
+    commands::refresh_index(window.app_handle());
+
     let _ = window.emit("photomem://present", ());
 }
 

@@ -88,8 +88,8 @@ In search: `↑`/`↓` move, `Enter` opens the note read-only, `Esc` goes back.
 In a note: `V` opens its image in its own window, as does clicking any thumbnail. That
 window is always 1600px on its long edge in the image's aspect ratio, so a full-screen
 capture opens at its own size and a smaller image is scaled up into the same frame. `Z` (or
-a click) toggles fit and 1:1 — drag to pan — `←`/`→` step through the note's images, and
-`Esc` closes it. Notes are never
+a click) toggles fit and 1:1, centred either way — drag to pan when it overflows — `←`/`→`
+step through the note's images, and `Esc` closes it. Notes are never
 edited in the app — corrections are new notes that supersede old ones, and a typo is fixed
 by opening the file in any editor.
 
@@ -126,6 +126,12 @@ never edited and never deleted, which is what keeps them cheap in git.
 Notes are plain markdown and nothing but the app cares about the filename, so editing one
 in any editor is safe and expected — that is the escape hatch that makes read-only,
 append-only capture reasonable.
+
+## Working on it
+
+The UI is embedded in the binary at build time. `src-tauri/build.rs` declares `ui/` as a
+build input, without which cargo happily relinks the old frontend into a "rebuilt" binary
+and every change to the page appears to do nothing.
 
 ## Not there yet
 

@@ -288,10 +288,14 @@ body.image-window {
   cursor: zoom-in;
 }
 
-/* 1:1 — native pixels, no resampling. The pane scrolls if that overflows. */
-body.zoomed #pane { place-items: start; cursor: grab; }
+/* 1:1 — native pixels, no resampling. Still centred: an image smaller than the
+   pane belongs in the middle, not in the top-left corner. `margin: auto` inside
+   a grid keeps it centred while overflow in either direction stays reachable,
+   which centring by alignment alone does not. */
+body.zoomed #pane { cursor: grab; }
 
 body.zoomed #image {
+  margin: auto;
   width: auto;
   height: auto;
   max-width: none;
