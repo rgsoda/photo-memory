@@ -259,8 +259,11 @@ and every change to the page appears to do nothing.
 Build with `--profile quick` while iterating:
 
 ```bash
-cargo build --profile quick && ./target/quick/photomem capture
+make quick && ./target/quick/photomem capture
 ```
+
+`make` on its own does that. `make check` compiles without producing a binary, `make
+release` builds the shipped one.
 
 `release` sets `lto = true` and `codegen-units = 1` to get the binary from 20 MB to 11 MB.
 Both are worth it in a shipped binary and neither is worth it in a rebuild loop: they are
