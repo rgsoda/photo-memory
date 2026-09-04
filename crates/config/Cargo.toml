@@ -7,3 +7,4 @@ edition.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 toml = "0.9"
+photomem-images.workspace = true

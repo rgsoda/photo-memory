@@ -1,0 +1,10 @@
+[package]
+name = "photomem-images"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
+webp = "0.3"
+sha2 = "0.10"

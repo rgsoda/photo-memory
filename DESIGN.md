@@ -109,10 +109,10 @@ On paste (Ctrl+V with an image on the clipboard):
 
 1. **Read** — `wl-paste -t image/png` on Wayland, `NSPasteboard` on macOS. Both are
    available through the Tauri clipboard plugin, with a direct fallback if it misbehaves.
-2. **Downscale** to a maximum long edge of **1200 px** (`image` crate, Lanczos3). No-op if
-   already smaller.
-3. **Encode WebP at q75.** A 4K screenshot lands around 80 KB, down from ~3 MB.
-4. **Write** `attachments/YYYY-MM-DD-<6 hex of content hash>.webp`. Content-hashed, so the
+2. **Downscale** to a maximum long edge of **1600 px** (`image` crate, Lanczos3). No-op if
+   already smaller, which is the common case for a window or region capture.
+3. **Encode WebP at q75.** A full-screen 4K capture lands at ~104 KB, down from ~2 MB.
+4. **Write** `attachments/YYYY-MM-DD-<12 hex of content hash>.webp`. Content-hashed, so the
    same image pasted twice reuses one file and filenames never collide across machines.
 5. **Thumbnail** at 320 px into `.photomem/thumbs/` for the grid view.
 6. **OCR in the background** (tesseract, ~200 ms) — the result goes into the index only,
@@ -124,20 +124,33 @@ On paste (Ctrl+V with an image on the clipboard):
    setting changes. Since the images are kept forever, re-OCR is always possible.
 7. Insert `![[filename]]` at the cursor; render it inline in the editor as a thumbnail.
 
+**Why 1600 and not 1200.** Measured on a real 3840x2160 desktop capture: at 1200 px it is
+62 KB but its text is no longer readable, which defeats both the point of keeping it and
+the OCR at M6. 1600 px stays legible at 104 KB; 1920 px is comfortably sharp at 145 KB.
+Full-screen 4K is the worst case, so these are ceilings rather than typical costs. All
+three numbers live in `config.toml` under `[image]` — someone on a 1080p screen can drop
+`max_edge` and halve their repo.
+
+**Why a 12-character hash.** Identical images are meant to collide, and dedupe. What must
+never happen is two *different* images sharing a name, one silently standing in for the
+other. Six hex characters is 24 bits, which reaches a coin-flip chance of that within a few
+thousand images. Twelve is 48 bits and does not.
+
 The original is **discarded**. Resolution is deliberately traded for a repo that stays small
 for a decade. If a full-resolution escape hatch is ever wanted, it should be an explicit
 per-paste modifier (Ctrl+Shift+V), not a default.
 
 ### Why not git-lfs
 
-At the expected 4–5 images/day, ~80 KB each:
+At the expected 4–5 images/day, ~100 KB each — the full-screen worst case, so real usage
+lands below this:
 
 | | |
 |---|---|
-| Per day | ~400 KB |
-| Per year | **~145 MB** |
+| Per day | ~500 KB |
+| Per year | **~180 MB** |
 | GitHub comfortable repo size | ~1 GB |
-| Runway | **6–7 years** |
+| Runway | **~5 years** |
 
 git-lfs would be *worse*: GitHub's free LFS tier is 1 GB storage and 1 GB/month bandwidth,
 which is a tighter ceiling than plain git gives here, and it breaks the escape hatch —
@@ -196,13 +209,20 @@ single text field. That is the whole interface.
 | Key | Action |
 |---|---|
 | *(type)* | First line is the title, the rest is the body |
-| `Ctrl+V` | Paste image from clipboard, inline thumbnail at the cursor |
+| `Ctrl+V` | Paste image from clipboard; embeds `![[name]]` and adds it to the strip |
 | `#` | Tag autocomplete from existing tags |
 | `Ctrl+Enter` | Save and close |
 | `Esc` | Close, stashing the buffer as a draft |
 
-Esc never destroys text. The buffer is written to `.photomem/drafts/` and restored on the
-next open, which is what makes the window feel disposable.
+Esc never destroys text. The buffer is written to `.photomem/draft.md` and restored on the
+next open, cursor at the end, which is what makes the window feel disposable.
+
+**Images in the editor.** A `<textarea>` cannot hold inline images, and swapping it for a
+`contenteditable` would cost more in text-editing quality than pictures in the flow are
+worth — and the editing surface is the one thing in a notes app that cannot be mediocre. So
+the note gets a `![[name]]` reference at the cursor, and the images themselves appear as a
+**thumbnail strip beneath the editor**, mirroring the references above it. An embed whose
+file is missing shows as a marked gap rather than vanishing.
 
 ### Search — one trigger, context decides
 
@@ -342,7 +362,7 @@ the design can be corrected by use rather than by argument.
 **M1 — Capture loop.** Tauri window, text field, save to `notes/`, first-line title,
 frontmatter, CLI + Hyprland binding. No search, no images. *Usable: it writes notes.*
 
-**M2 — Images.** Clipboard paste, downscale, WebP, inline thumbnail, attachment refs.
+**M2 — Images.** Clipboard paste, downscale, WebP, thumbnail strip, attachment refs.
 *Usable: the actual point of the app.*
 
 **M3 — Index and search.** SQLite/FTS5, file watcher, `//` search over an empty buffer.

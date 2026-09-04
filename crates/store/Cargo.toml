@@ -5,4 +5,5 @@ edition.workspace = true
 
 [dependencies]
 photomem-core.workspace = true
+photomem-images.workspace = true
 anyhow.workspace = true

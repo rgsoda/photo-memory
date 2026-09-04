@@ -91,3 +91,34 @@ kbd {
 }
 
 .hints kbd + kbd { margin-left: 1px; }
+
+/* A textarea cannot hold inline images, and swapping it for a contenteditable
+   would cost more in text-editing quality than the pictures are worth here. So
+   images live in a strip under the editor, mirroring the ![[…]] refs above. */
+#strip {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  overflow-x: auto;
+  background: var(--bg);
+  border-top: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+#strip img {
+  height: 64px;
+  width: auto;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
+  object-fit: cover;
+}
+
+#strip .missing {
+  display: grid;
+  place-items: center;
+  height: 64px;
+  padding: 0 12px;
+  border: 1px dashed var(--error);
+  border-radius: 6px;
+  color: var(--error);
+  font-size: 11px;
+}

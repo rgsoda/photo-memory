@@ -22,6 +22,14 @@ install -Dm755 target/release/photomem ~/.local/bin/photomem
 ```toml
 # The notes repository. Created on first save; make it a git repo to sync it.
 vault = "/home/you/photomem"
+
+[image]
+# Pasted images are scaled to this long edge and re-encoded as WebP. Measured on
+# a 4K screenshot: 1200 is 62 KB but too soft to read, 1600 is 104 KB and legible,
+# 1920 is 145 KB and sharp. Window captures are usually below this and untouched.
+max_edge = 1600
+thumb_edge = 320
+quality = 75
 ```
 
 The vault is a **separate repo** from this one — this holds the app, that holds your notes.
@@ -51,6 +59,7 @@ windowrulev2 = stayfocused, class:^(photomem)$
 | Key | Action |
 |---|---|
 | *(type)* | First non-empty line becomes the title and the filename slug |
+| `Ctrl+V` | Paste an image from the clipboard |
 | `Ctrl+Enter` | Save and hide |
 | `Esc` | Hide, stashing the text as a draft |
 
@@ -62,7 +71,7 @@ the next capture, cursor at the end.
 ```
 vault/
   notes/2026-09-04-1652-kafka-rebalance-storm.md
-  attachments/                 # M2
+  attachments/2026-09-04-e382057b79ca.webp
   .photomem/                   # gitignored: drafts now, index and thumbs later
   .gitignore
 ```
@@ -74,8 +83,12 @@ created: "2026-09-04T16:52:25+02:00"
 modified: "2026-09-04T16:52:25+02:00"
 ---
 Kafka rebalance storm
+![[2026-09-04-e382057b79ca.webp]]
 Consumers dropped every 40s.
 ```
+
+Images are content-hashed, so pasting the same screenshot twice stores one file. They are
+never edited and never deleted, which is what keeps them cheap in git.
 
 Notes are plain markdown and nothing but the app cares about the filename, so editing one
 in any editor is safe and expected — that is the escape hatch that makes read-only,
@@ -84,4 +97,5 @@ append-only capture reasonable.
 ## Not there yet
 
 - No tray icon, so the daemon is stopped with `pkill -x photomem`.
-- No image paste (M2), search (M3), links (M4), sync (M5), OCR (M6).
+- Images show in a strip under the editor, not inline in the text.
+- No search (M3), links (M4), sync (M5), OCR (M6).

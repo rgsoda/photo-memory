@@ -8,16 +8,47 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// The notes repository. A separate git repo from the app itself.
     pub vault: PathBuf,
+    pub image: ImageConfig,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { vault: home().join("photomem") }
+        Config { vault: home().join("photomem"), image: ImageConfig::default() }
+    }
+}
+
+/// How pasted images are stored. Defaults suit a 4K screen; someone on a 1080p
+/// laptop can drop `max_edge` and halve their repo.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct ImageConfig {
+    /// Long edge in pixels. Smaller images are never upscaled.
+    pub max_edge: u32,
+    /// Long edge of grid thumbnails.
+    pub thumb_edge: u32,
+    /// WebP quality, 0-100.
+    pub quality: f32,
+}
+
+impl Default for ImageConfig {
+    fn default() -> Self {
+        let d = photomem_images::Options::default();
+        ImageConfig { max_edge: d.max_edge, thumb_edge: d.thumb_edge, quality: d.quality }
+    }
+}
+
+impl From<ImageConfig> for photomem_images::Options {
+    fn from(c: ImageConfig) -> Self {
+        photomem_images::Options {
+            max_edge: c.max_edge.max(64),
+            thumb_edge: c.thumb_edge.max(32),
+            quality: c.quality.clamp(1.0, 100.0),
+        }
     }
 }
 
@@ -29,6 +60,14 @@ const TEMPLATE: &str = "\
 
 # The notes repository. Created on first save; make it a git repo to sync it.
 vault = \"{vault}\"
+
+[image]
+# Pasted images are scaled to this long edge and re-encoded as WebP. Measured on
+# a 4K screenshot: 1200 is 62 KB but too soft to read, 1600 is 104 KB and legible,
+# 1920 is 145 KB and sharp. Window captures are usually below this and untouched.
+max_edge = {max_edge}
+thumb_edge = {thumb_edge}
+quality = {quality}
 ";
 
 impl Config {
@@ -57,7 +96,11 @@ impl Config {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let body = TEMPLATE.replace("{vault}", &self.vault.display().to_string());
+        let body = TEMPLATE
+            .replace("{vault}", &self.vault.display().to_string())
+            .replace("{max_edge}", &self.image.max_edge.to_string())
+            .replace("{thumb_edge}", &self.image.thumb_edge.to_string())
+            .replace("{quality}", &self.image.quality.to_string());
         std::fs::write(path, body)?;
         Ok(())
     }
@@ -110,6 +153,23 @@ mod tests {
         let path = tmpdir("tilde").join("config.toml");
         std::fs::write(&path, "vault = \"~/notes\"\n").unwrap();
         assert_eq!(Config::load_from(&path).unwrap().vault, home().join("notes"));
+    }
+
+    #[test]
+    fn image_defaults_are_filled_in_when_absent() {
+        let path = tmpdir("image-absent").join("config.toml");
+        std::fs::write(&path, "vault = \"~/notes\"\n").unwrap();
+        assert_eq!(Config::load_from(&path).unwrap().image, ImageConfig::default());
+    }
+
+    #[test]
+    fn image_settings_override_and_clamp() {
+        let path = tmpdir("image-set").join("config.toml");
+        std::fs::write(&path, "[image]\nmax_edge = 1920\nquality = 200\n").unwrap();
+        let opts: photomem_images::Options = Config::load_from(&path).unwrap().image.into();
+        assert_eq!(opts.max_edge, 1920);
+        // A nonsense quality must not reach the encoder.
+        assert_eq!(opts.quality, 100.0);
     }
 
     #[test]

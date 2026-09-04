@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use photomem_core::Note;
+use photomem_images::Attachment;
 
 /// The notes repository on disk.
 pub struct Vault {
@@ -26,6 +27,14 @@ impl Vault {
     /// Derived state: index, thumbnails, drafts. Gitignored, always rebuildable.
     pub fn state_dir(&self) -> PathBuf {
         self.root.join(".photomem")
+    }
+
+    pub fn attachments_dir(&self) -> PathBuf {
+        self.root.join("attachments")
+    }
+
+    pub fn thumbs_dir(&self) -> PathBuf {
+        self.state_dir().join("thumbs")
     }
 
     fn draft_path(&self) -> PathBuf {
@@ -54,10 +63,7 @@ impl Vault {
         self.ensure()?;
         let path = self.free_path(&note.filename());
 
-        let tmp = self.state_dir().join(format!("tmp-{}", note.id));
-        std::fs::write(&tmp, note.render()).with_context(|| format!("writing {}", tmp.display()))?;
-        std::fs::rename(&tmp, &path).with_context(|| format!("renaming into {}", path.display()))?;
-
+        write_atomic(&path, note.render().as_bytes(), &self.state_dir())?;
         Ok(path)
     }
 
@@ -75,6 +81,52 @@ impl Vault {
             .map(|n| dir.join(format!("{stem}-{n}.md")))
             .find(|p| !p.exists())
             .expect("an unused filename exists")
+    }
+
+    /// Write an attachment and its thumbnail, returning the filename to embed.
+    ///
+    /// The same image pasted twice reuses the existing file rather than storing
+    /// a second copy — the name is content-derived, so this is safe.
+    pub fn save_attachment(&self, a: &Attachment, date: &str) -> Result<String> {
+        self.ensure()?;
+        std::fs::create_dir_all(self.thumbs_dir())?;
+
+        let name = match self.existing_attachment(&a.hash) {
+            Some(name) => name,
+            None => {
+                let name = format!("{date}-{}.webp", a.hash);
+                write_atomic(&self.attachments_dir().join(&name), &a.webp, &self.state_dir())?;
+                name
+            }
+        };
+
+        // The thumbnail is derived state and may be missing even when the image
+        // is not, after a fresh clone or a cleared cache.
+        let thumb = self.thumbs_dir().join(&name);
+        if !thumb.exists() {
+            write_atomic(&thumb, &a.thumb, &self.state_dir())?;
+        }
+        Ok(name)
+    }
+
+    /// An already-stored attachment with this content hash, whatever date it
+    /// was first captured on.
+    fn existing_attachment(&self, hash: &str) -> Option<String> {
+        let suffix = format!("-{hash}.webp");
+        std::fs::read_dir(self.attachments_dir())
+            .ok()?
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .find(|n| n.ends_with(&suffix))
+    }
+
+    pub fn read_thumbnail(&self, name: &str) -> Option<Vec<u8>> {
+        // Reject anything that could climb out of the thumbnails directory: the
+        // name arrives from note text, which is not necessarily ours.
+        if name.contains('/') || name.contains('\\') || name.contains("..") {
+            return None;
+        }
+        std::fs::read(self.thumbs_dir().join(name)).ok()
     }
 
     /// Stash unsaved editor text. Escape must never destroy what was typed.
@@ -98,6 +150,16 @@ impl Vault {
             Err(e) => Err(e.into()),
         }
     }
+}
+
+/// Write via a temp file in `scratch` and rename, so a crash mid-write cannot
+/// leave a half-written file where a reader will find it.
+fn write_atomic(path: &Path, bytes: &[u8], scratch: &Path) -> Result<()> {
+    std::fs::create_dir_all(scratch)?;
+    let tmp = scratch.join(format!("tmp-{}", std::process::id()));
+    std::fs::write(&tmp, bytes).with_context(|| format!("writing {}", tmp.display()))?;
+    std::fs::rename(&tmp, path).with_context(|| format!("renaming into {}", path.display()))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -144,6 +206,49 @@ mod tests {
         assert_ne!(pa, pb);
         assert!(pb.to_str().unwrap().ends_with("-same-title-2.md"));
         assert!(pa.exists() && pb.exists());
+    }
+
+    fn attachment(seed: u8) -> Attachment {
+        let px: Vec<u8> = (0..64 * 64 * 4).map(|i| (i as u8).wrapping_add(seed)).collect();
+        photomem_images::from_rgba(64, 64, &px, Default::default()).unwrap()
+    }
+
+    #[test]
+    fn saves_an_attachment_with_its_thumbnail() {
+        let v = vault("attach");
+        let a = attachment(0);
+        let name = v.save_attachment(&a, "2026-09-04").unwrap();
+
+        assert_eq!(name, format!("2026-09-04-{}.webp", a.hash));
+        assert_eq!(std::fs::read(v.attachments_dir().join(&name)).unwrap(), a.webp);
+        assert_eq!(v.read_thumbnail(&name).unwrap(), a.thumb);
+    }
+
+    #[test]
+    fn the_same_image_is_stored_once_even_on_a_later_day() {
+        let v = vault("dedupe");
+        let a = attachment(0);
+        let first = v.save_attachment(&a, "2026-09-04").unwrap();
+        let second = v.save_attachment(&a, "2026-11-20").unwrap();
+
+        assert_eq!(first, second, "a re-paste must reuse the stored file");
+        assert_eq!(std::fs::read_dir(v.attachments_dir()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn different_images_get_different_names() {
+        let v = vault("distinct");
+        let a = v.save_attachment(&attachment(0), "2026-09-04").unwrap();
+        let b = v.save_attachment(&attachment(9), "2026-09-04").unwrap();
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn thumbnail_reads_refuse_to_escape_the_vault() {
+        let v = vault("escape");
+        v.ensure().unwrap();
+        assert!(v.read_thumbnail("../../etc/passwd").is_none());
+        assert!(v.read_thumbnail("nope.webp").is_none());
     }
 
     #[test]

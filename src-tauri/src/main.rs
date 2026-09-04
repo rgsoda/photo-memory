@@ -42,6 +42,8 @@ fn main() {
             commands::save_draft,
             commands::load_draft,
             commands::dismiss,
+            commands::paste_image,
+            commands::thumbnails,
         ])
         .setup(move |app| {
             let window = app.get_webview_window("main").expect("main window exists");
