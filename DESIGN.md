@@ -14,6 +14,8 @@ Status: design agreed, no code written.
 - Capture in under two seconds from any application, without breaking flow.
 - Images come from the clipboard. Pasting a screenshot is the primary image path.
 - Atomic entries linked to each other, Obsidian-style, with backlinks.
+- **Append-only.** The app never edits an existing note; corrections are new notes that
+  supersede old ones.
 - Runs on Linux (Wayland/Hyprland) and macOS from one codebase.
 - All data in one plain-file repo, synced through a private GitHub repo.
 - Small: a single background process, tens of MB on disk, instant window.
@@ -68,6 +70,7 @@ all metadata comes from frontmatter. Renaming a file by hand is safe.
 id: 01JBQX7K2M8VN4RTYCE5FZAW9H
 created: 2026-09-04T16:18:42+02:00
 modified: 2026-09-04T16:18:42+02:00
+supersedes: [[2026-03-11-0902-kafka-poll-tuning]]   # optional
 ---
 Kafka consumer rebalance storm
 
@@ -91,6 +94,8 @@ Same failure mode as [[2026-05-02-1130-flink-checkpoint-timeouts]].
 - **Hierarchical tags** (`#work/kafka`) are supported by prefix match: `#work` matches
   everything beneath it. This gives a second grouping axis for free.
 - **`[[wiki-links]]`** between notes. Backlinks are derived by the index.
+- **`supersedes`** is an optional typed link marking an older note as corrected or
+  obsoleted by this one. See §6.
 - **`![[attachment.webp]]`** embeds an image.
 
 Frontmatter stays minimal on purpose — three fields, all machine-managed. Tags and links
@@ -211,6 +216,33 @@ which eliminates `https://` entirely. Esc dismisses the picker and leaves a lite
 behind, covering pasted `// code comments`. **`[[` is wired to the same picker** — it
 matches the on-disk format and carries Obsidian muscle memory.
 
+### Viewing — read-only, append-only
+
+Enter on a search result **displays** the note. It is never editable in the popup. This is
+a deliberate constraint: the capture window stays a single-purpose, disposable thing, and
+notes accumulate as an honest record of what was believed when. Corrections are new
+entries, not rewrites.
+
+This is a *UI* constraint, not a data one. The files are plain markdown and the watcher
+picks up outside changes, so fixing a typo means opening the file in any editor. That
+escape hatch is what makes the constraint safe to impose.
+
+The failure mode of append-only is reading an old note without learning it was later
+proved wrong. A plain backlink is too quiet for that, so **supersession is a typed link**:
+writing `supersedes: [[old-note]]` in the new note makes the index mark the old one, and
+its read-only view opens with a banner —
+
+```
+⚠ Superseded by "Kafka consumer rebalance storm" — 2026-09-04
+```
+
+In the `//` picker, `Ctrl+Enter` on a result inserts the reference as a supersedes link
+instead of an inline `[[link]]`. The old note is never touched; the relationship lives
+entirely in the new one and is derived by the index.
+
+Actions available on a displayed note: copy its `[[link]]`, open the file in `$EDITOR`,
+reveal it in a file manager, start a new note that supersedes it.
+
 ### Browsing
 
 Two views beyond search, reachable from the search results screen:
@@ -300,7 +332,8 @@ frontmatter, CLI + Hyprland binding. No search, no images. *Usable: it writes no
 **M3 — Index and search.** SQLite/FTS5, file watcher, `//` search over an empty buffer.
 *Usable: notes become findable.*
 
-**M4 — Links.** `//` and `[[` pickers mid-note, link resolution, backlinks on open notes.
+**M4 — Links.** `//` and `[[` pickers mid-note, link resolution, backlinks and the
+read-only viewer, `supersedes` and its banner.
 *Usable: it becomes a connected system rather than a pile.*
 
 **M5 — Sync.** git pull/commit/push, tray status, conflict handling.
@@ -324,16 +357,14 @@ M6 is the one to protect from being cut when the project gets boring.
 - Force-directed graph view — build backlinks and the thumbnail wall first, then see.
 - Full-resolution originals behind a modifier key.
 - Encryption at rest. The repo is private; that is the current threat model.
-- Editing notes outside the popup. For now, edit externally in any editor — the watcher
-  picks it up.
+- In-app editing of any kind. Decided against: see §6. External editor plus the watcher
+  is the escape hatch.
 
 **Open questions**
 
-1. **Editing an existing note** — does Enter on a search result open it in the popup for
-   editing, or just display it read-only with a "reveal in $EDITOR" action? Leaning
-   editable, but it complicates a window whose whole virtue is being disposable.
-2. **Attachment garbage collection.** If a note is deleted, its images are orphaned. A
+1. **Attachment garbage collection.** If a note is deleted, its images are orphaned. A
    `photomem gc` command that reports orphans and deletes on confirmation, run manually?
-3. **OCR language set.** English only, or English + Polish? Multi-language tesseract is
+2. **OCR language set.** English only, or English + Polish? Multi-language tesseract is
    slower and noisier; adding a second language should be a config flag, defaulting to one.
-4. **Note deletion from the UI at all**, or leave it to `rm` plus the watcher?
+3. **Note deletion** — presumably also out of the app, consistent with append-only:
+   `rm` plus the watcher. Confirm.
