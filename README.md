@@ -3,10 +3,10 @@
 Fast visual note capture. Hotkey, type, save, gone.
 
 See [DESIGN.md](DESIGN.md) for the format and the plan. Working today: capture, clipboard
-images, full-text search, the read-only viewer, and citations between notes. Not yet: sync,
-OCR, macOS.
+images, full-text search, the read-only viewer, and citations between notes — on Linux and
+macOS both. Not yet: sync, OCR, and a packaged macOS build.
 
-## Install (Linux)
+## Install
 
 ```bash
 git clone git@github.com:rgsoda/photo-memory.git
@@ -16,7 +16,7 @@ cd photo-memory
 
 That checks the build dependencies, builds, and puts the binary in `~/.local/bin`. It never
 touches your compositor config or your shell profile — it prints what to add and leaves
-those files to you.
+those files to you. It is Linux-only; on macOS, build by hand as below.
 
 | | |
 |---|---|
@@ -44,6 +44,10 @@ than shipping a browser, which is what keeps the binary around 11 MB.
 ```toml
 # The notes repository. Created on first save; make it a git repo to sync it.
 vault = "/home/you/photomem"
+
+# The global capture hotkey. macOS only — on Linux this is a compositor binding.
+# Modifiers: Ctrl, Alt, Shift, Cmd (or Super). Takes effect on restart.
+hotkey = "Ctrl+Alt+N"
 
 [image]
 # Pasted images are scaled to this long edge and re-encoded as WebP. Measured on
@@ -93,7 +97,21 @@ o.window({ class = "^photomem$", title = "^photomem$" }, { size = "720 400" })
 
 Validate with `hyprctl reload && hyprctl configerrors`.
 
-**macOS** — not yet; see M8 in the design. The app registers its own hotkey there.
+**macOS** — nothing to configure in a compositor: the app registers the hotkey itself.
+Start `photomem daemon` and press **`Ctrl+Alt+N`**.
+
+The binding lives in `config.toml` rather than being fixed, because a global hotkey that
+collides with something you already use would otherwise leave the app unreachable. It is
+not `Super+N` as on Linux — "Super" is Command on macOS, and grabbing Cmd+N globally would
+swallow "New" in every application on the machine.
+
+Registration goes through Carbon's `RegisterEventHotKey`, which asks for no accessibility
+permission, so there is no prompt on first run and nothing to grant in System Settings. If
+the key cannot be bound the app says so on stderr and starts anyway — `photomem capture`
+still opens the window.
+
+Not packaged yet: no `.app`, no menu bar agent, no LaunchAgent, so the daemon keeps a dock
+icon and is started by hand. That is the rest of M8.
 
 ## Keys
 
@@ -173,4 +191,6 @@ and every change to the page appears to do nothing.
 - Links can be written and followed, but a note does not yet show what links *to* it, and a
   superseded note opens with no banner saying so (M4).
 - `photomem --help` opens the window instead of printing help.
+- On macOS the app runs but is not packaged: no `.app` bundle, menu bar agent or
+  LaunchAgent, and `install.sh` is Linux-only (M8).
 - No sync (M5), OCR (M6).

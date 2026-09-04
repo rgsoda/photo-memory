@@ -20,3 +20,9 @@ serde_json = "1"
 anyhow.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-single-instance = "2"
+
+# Only macOS registers its own hotkey. On Linux the compositor owns the binding
+# (Wayland has no protocol for app-registered global shortcuts), so the plugin
+# would be dead weight in that binary.
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri-plugin-global-shortcut = "2"
