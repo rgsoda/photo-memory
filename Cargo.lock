@@ -2697,6 +2697,7 @@ dependencies = [
  "photomem-index",
  "photomem-store",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",

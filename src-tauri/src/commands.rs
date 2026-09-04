@@ -6,7 +6,7 @@ use photomem_config::Config;
 use photomem_core::Note;
 use photomem_index::Index;
 use photomem_store::Vault;
-use tauri::{Manager, Runtime, State, Window};
+use tauri::{Emitter, Manager, Runtime, State, Window};
 
 /// The index is opened once and reused; reopening it per keystroke would make
 /// search-as-you-type noticeably slower than typing.
@@ -253,3 +253,67 @@ pub fn read_image(name: String) -> CmdResult<String> {
     Ok(data_url(&bytes))
 }
 
+
+/// Open the image viewer window, or point the existing one at another image.
+///
+/// A separate window rather than an overlay in the capture window: a compositor
+/// honours the size a window asks for when it is *created*, but not a resize
+/// requested later — Hyprland accepts `set_size` and ignores it. So the way to
+/// get a big window is to open one that was big to begin with.
+#[tauri::command]
+pub fn open_image<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    names: Vec<String>,
+    index: usize,
+) -> CmdResult<()> {
+    if names.is_empty() {
+        return Err("no images to show".into());
+    }
+
+    if let Some(window) = app.get_webview_window(IMAGE_WINDOW) {
+        window.emit_to(IMAGE_WINDOW, "photomem://show", (&names, index)).map_err(|e| e.to_string())?;
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let query = format!(
+        "image.html?i={index}&n={}",
+        urlencode(&serde_json::to_string(&names).map_err(|e| e.to_string())?)
+    );
+
+    // Fullscreen rather than a large size: a compositor treats fullscreen as a
+    // protocol state and honours it, while it is free to ignore the pixel size a
+    // client asks for — and Hyprland does, both at creation and on resize.
+    tauri::WebviewWindowBuilder::new(&app, IMAGE_WINDOW, tauri::WebviewUrl::App(query.into()))
+        .title("photomem — image")
+        .decorations(false)
+        .fullscreen(true)
+        .focused(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn close_image<R: Runtime>(app: tauri::AppHandle<R>) -> CmdResult<()> {
+    if let Some(window) = app.get_webview_window(IMAGE_WINDOW) {
+        window.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+const IMAGE_WINDOW: &str = "image";
+
+/// Enough escaping for a filename in a query string. Attachment names are
+/// `date-hash.webp`, but a hand-edited note can say anything.
+fn urlencode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}

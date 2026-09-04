@@ -1,7 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the capture window.",
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "description": "Capabilities for the capture and image windows.",
+  "windows": [
+    "main",
+    "image"
+  ],
+  "permissions": [
+    "core:default"
+  ]
 }

@@ -28,21 +28,13 @@ const HINTS = {
   capture: "<kbd>Ctrl</kbd><kbd>↵</kbd> save &nbsp; <kbd>//</kbd> search &nbsp; <kbd>Esc</kbd> dismiss",
   search: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>Esc</kbd> back",
   viewer: "<kbd>V</kbd> view image &nbsp; <kbd>Esc</kbd> back to results",
-  lightbox: "<kbd>Z</kbd> actual size &nbsp; <kbd>←</kbd><kbd>→</kbd> next &nbsp; <kbd>Esc</kbd> close",
-  zoomed: "drag to pan &nbsp; <kbd>Z</kbd> fit &nbsp; <kbd>Esc</kbd> close",
 };
-
-const lightbox = document.getElementById("lightbox");
-const lightboxImage = document.getElementById("lightbox-image");
-const lightboxCaption = document.getElementById("lightbox-caption");
 
 let mode = "capture";
 let hits = [];
 let selected = 0;
-/** Image names the current mode can show, and which one is open. */
+/** Image names the open note embeds, for stepping through in the image window. */
 let gallery = [];
-let shown = 0;
-let zoomed = false;
 let draftTimer = null;
 let searchTimer = null;
 let statusTimer = null;
@@ -60,110 +52,13 @@ function setMode(next) {
   hints.innerHTML = HINTS[next];
 }
 
-/* ── lightbox ────────────────────────────────────────────────────────────── */
+/* ── images ──────────────────────────────────────────────────────────────── */
 
-function lightboxOpen() {
-  return !lightbox.hidden;
-}
-
-async function showImage(index) {
-  if (!gallery.length) return;
-  shown = (index + gallery.length) % gallery.length;
-  const name = gallery[shown];
-
-  try {
-    lightboxImage.src = await invoke("read_image", { name });
-  } catch (e) {
-    setStatus(String(e), "error");
-    return;
-  }
-
-  setZoom(false);
-  lightboxImage.alt = name;
-  lightboxCaption.textContent =
-    gallery.length > 1 ? `${name}  ·  ${shown + 1}/${gallery.length}` : name;
-
-  if (!lightboxOpen()) {
-    lightbox.hidden = false;
-    setZoom(false);
-  }
-}
-
-/**
- * Fit-to-window or actual size.
- *
- * The window cannot grow to meet the image: under Wayland the compositor owns
- * window geometry and Hyprland declines a client-initiated resize (set_size
- * returns Ok and nothing moves). Fitting a 1600px screenshot into a 720px
- * window is barely better than the thumbnail, so the lightbox zooms instead —
- * actual size with drag-to-pan, which is what reading a screenshot needs
- * anyway, and which behaves the same on every platform.
- */
-function setZoom(on) {
-  zoomed = on;
-  lightbox.classList.toggle("zoomed", on);
-  hints.innerHTML = on ? HINTS.zoomed : HINTS.lightbox;
-  if (!on) lightbox.scrollTo(0, 0);
-}
-
-function closeLightbox() {
-  if (!lightboxOpen()) return;
-  lightbox.hidden = true;
-  lightboxImage.removeAttribute("src");
-  setZoom(false);
-  hints.innerHTML = HINTS[mode];
-}
-
-/* ── capture ─────────────────────────────────────────────────────────────── */
-
-function focusEditor() {
-  editor.focus();
-  // Cursor at the end, so resuming a draft continues where it stopped.
-  editor.setSelectionRange(editor.value.length, editor.value.length);
-}
-
-/** Drafts are what make Escape safe, so they are written on a short debounce. */
-function queueDraftSave() {
-  clearTimeout(draftTimer);
-  draftTimer = setTimeout(() => {
-    invoke("save_draft", { text: editor.value }).catch(() => {});
-  }, DRAFT_DEBOUNCE_MS);
-}
-
-async function restoreDraft() {
-  try {
-    editor.value = await invoke("load_draft");
-  } catch (e) {
-    setStatus(String(e), "error");
-  }
-  focusEditor();
-  refreshStrip();
-}
-
-/** Names of the images the buffer currently embeds, in order, deduped. */
-function embeddedNames() {
-  return [...new Set(Array.from(editor.value.matchAll(EMBED), (m) => m[1]))];
-}
-
-async function refreshStrip() {
-  const names = embeddedNames();
-  if (!names.length) {
-    strip.hidden = true;
-    strip.replaceChildren();
-    return;
-  }
-
-  let found = [];
-  try {
-    found = await invoke("thumbnails", { names });
-  } catch (e) {
-    setStatus(String(e), "error");
-  }
-
-  const byName = new Map(found.map((p) => [p.name, p.thumb]));
-  const present = names.filter((n) => byName.has(n));
-  strip.replaceChildren(...names.map((name) => thumbFor(name, byName.get(name), present)));
-  strip.hidden = false;
+/** Open the image window on `name`, with the note's other images alongside it. */
+function openImage(name, names) {
+  invoke("open_image", { names, index: names.indexOf(name) }).catch((e) =>
+    setStatus(String(e), "error")
+  );
 }
 
 function thumbFor(name, thumb, names = null) {
@@ -178,10 +73,7 @@ function thumbFor(name, thumb, names = null) {
   img.src = thumb;
   img.alt = name;
   img.title = `${name} — click to view full size`;
-  img.addEventListener("click", () => {
-    gallery = names ?? [name];
-    showImage(gallery.indexOf(name));
-  });
+  img.addEventListener("click", () => openImage(name, names ?? [name]));
   return img;
 }
 
@@ -379,8 +271,6 @@ editor.addEventListener("paste", (e) => {
 });
 
 editor.addEventListener("keydown", (e) => {
-  // Esc belongs to the lightbox while it is open; the document handler has it.
-  if (lightboxOpen()) return;
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
     save();
@@ -393,7 +283,6 @@ editor.addEventListener("keydown", (e) => {
 query.addEventListener("input", queueSearch);
 
 query.addEventListener("keydown", (e) => {
-  if (lightboxOpen()) return;
   switch (e.key) {
     case "ArrowDown":
       e.preventDefault();
@@ -414,49 +303,23 @@ query.addEventListener("keydown", (e) => {
   }
 });
 
-// The lightbox and viewer have no input of their own, so their keys are caught
-// on the way up. The lightbox is checked first: it overlays every mode, and Esc
-// must close it rather than dismissing the window underneath.
+// The viewer has no input of its own, so its keys are caught on the way up.
 document.addEventListener("keydown", (e) => {
-  if (lightboxOpen()) {
-    switch (e.key) {
-      case "Escape":
-      case "v":
-        e.preventDefault();
-        closeLightbox();
-        break;
-      case "z":
-        e.preventDefault();
-        setZoom(!zoomed);
-        break;
-      case "ArrowRight":
-        e.preventDefault();
-        showImage(shown + 1);
-        break;
-      case "ArrowLeft":
-        e.preventDefault();
-        showImage(shown - 1);
-        break;
-    }
-    return;
-  }
-
-  if (mode === "viewer") {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      setMode("search");
-      query.focus();
-    } else if (e.key === "v") {
-      e.preventDefault();
-      showImage(0);
-    }
+  if (mode !== "viewer") return;
+  if (e.key === "Escape") {
+    e.preventDefault();
+    setMode("search");
+    query.focus();
+  } else if (e.key === "v" && gallery.length) {
+    e.preventDefault();
+    openImage(gallery[0], gallery);
   }
 });
 
 // The window is reused rather than recreated, so every hotkey press after the
 // first arrives as this event instead of a page load.
 listen("photomem://present", () => {
-  closeLightbox();
+  invoke("close_image").catch(() => {});
   setMode("capture");
   restoreDraft();
   invoke("refresh").catch(() => {});
@@ -465,29 +328,3 @@ listen("photomem://present", () => {
 setMode("capture");
 restoreDraft();
 invoke("refresh").catch((e) => setStatus(String(e), "error"));
-
-/* Click the image to toggle zoom; drag to pan once it is bigger than the pane. */
-lightboxImage.addEventListener("click", (e) => {
-  e.stopPropagation();
-  setZoom(!zoomed);
-});
-
-lightbox.addEventListener("pointerdown", (e) => {
-  if (!zoomed) return;
-  const from = { x: e.clientX, y: e.clientY, left: lightbox.scrollLeft, top: lightbox.scrollTop };
-  let moved = false;
-
-  const drag = (m) => {
-    moved = true;
-    lightbox.scrollLeft = from.left - (m.clientX - from.x);
-    lightbox.scrollTop = from.top - (m.clientY - from.y);
-  };
-  const stop = () => {
-    document.removeEventListener("pointermove", drag);
-    // A drag must not also register as the click that toggles zoom back.
-    if (moved) lightboxImage.addEventListener("click", (c) => c.stopPropagation(), { once: true, capture: true });
-  };
-
-  document.addEventListener("pointermove", drag);
-  document.addEventListener("pointerup", stop, { once: true });
-});

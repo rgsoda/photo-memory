@@ -257,61 +257,58 @@ kbd {
   border: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
 }
 
-/* ── lightbox ──────────────────────────────────────────────────────────── */
+/* ── image window ──────────────────────────────────────────────────────── */
 
-#lightbox {
-  position: fixed;
-  /* Stops above the footer so its key hints stay readable. */
-  inset: 0 0 30px 0;
-  z-index: 10;
+/* Its own top-level window, sized big at creation. A compositor honours the
+   size a window is born with; Hyprland ignores a later resize request. */
+body.image-window {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 16px;
-  overflow: auto;
-  /* Opaque: a note showing through behind a screenshot makes both unreadable. */
+  height: 100vh;
   background: var(--bg);
 }
 
-#lightbox[hidden] { display: none; }
-
-#lightbox-image {
-  max-width: 100%;
-  /* Leave room for the caption line below it. */
-  max-height: calc(100% - 24px);
-  object-fit: contain;
-  cursor: zoom-in;
-  border-radius: 6px;
-  border: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
+#pane {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  overflow: auto;
 }
 
-#lightbox-caption {
+/* Fit scales to fill the pane in both directions. On a 4K screen a 1600px
+   capture would otherwise sit small in the middle of an empty window — and
+   there, fit is the *larger* of the two modes, not the smaller. */
+#image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+  cursor: zoom-in;
+}
+
+/* 1:1 — native pixels, no resampling. The pane scrolls if that overflows. */
+body.zoomed #pane { place-items: start; cursor: grab; }
+
+body.zoomed #image {
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  cursor: grab;
+}
+
+body.zoomed #pane:active,
+body.zoomed #pane:active #image { cursor: grabbing; }
+
+#caption {
   color: var(--muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
-/* Thumbnails are openable, so they should look it. */
+/* Thumbnails open the image window, so they should look openable. */
 #strip img,
 #viewer-images img { cursor: zoom-in; }
-
-/* Actual size: the image overflows and the pane scrolls, because the window
-   cannot grow to meet it (the compositor owns window geometry under Wayland). */
-#lightbox.zoomed {
-  justify-content: flex-start;
-  align-items: flex-start;
-  cursor: grab;
-}
-
-#lightbox.zoomed #lightbox-image {
-  max-width: none;
-  max-height: none;
-  cursor: grab;
-}
-
-#lightbox.zoomed:active,
-#lightbox.zoomed:active #lightbox-image { cursor: grabbing; }
-
-#lightbox.zoomed #lightbox-caption { position: sticky; left: 0; }

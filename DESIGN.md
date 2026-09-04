@@ -286,17 +286,26 @@ Actions available on a displayed note: copy its `[[link]]`, open the file in `$E
 reveal it in a file manager, start a new note that supersedes it.
 
 **Opening an image.** `V` in the viewer, or clicking any thumbnail — including one in the
-capture strip — opens the picture over the whole window. `Z` or a click toggles between
-fit-to-window and actual size, where the pane scrolls and the image can be dragged; `←`/`→`
-move between the images in the note.
+capture strip — opens the picture in a **separate fullscreen window**. `Z` or a click
+toggles fit-to-screen and 1:1 with drag-to-pan; `←`/`→` step through the note's images;
+`Esc` closes it and leaves the capture window as it was.
 
-Actual size matters more than it sounds: fitting a 1600px screenshot into a 720px window
-leaves it barely better than the thumbnail, and reading the text in a captured Slack thread
-is the entire reason the image is there. The obvious fix — grow the window while an image
-is open — **does not work under Wayland**: the compositor owns window geometry, and
-Hyprland declines a client-initiated resize (Tauri's `set_size` returns `Ok` and nothing
-moves). Zooming inside the window needs no compositor cooperation and behaves identically
-on macOS.
+A separate window, because reading the text in a captured Slack thread is the entire point
+of keeping the picture, and a 1600px image scaled into a 720px capture window is no more
+readable than its thumbnail.
+
+Two things this cost, both worth recording:
+
+- **The window rule has to match on title, not just class.** Every photomem window shares
+  the class, so `o.window({ class = "^photomem$" }, { size = "720 400" })` pins the image
+  window to 720x400 too — and, because a compositor rule outranks the client, it also makes
+  Tauri's `set_size` silently do nothing. That looked exactly like Wayland refusing
+  client-initiated resizes on principle, which it is not. Adding `title = "^photomem$"`
+  scopes the rule to the capture window.
+- **Fit scales up, not just down.** On a 4K screen a 1600px capture sits small in the middle
+  of an empty window unless fit is allowed to enlarge it — and there, fit is the *larger* of
+  the two modes, which is why they are labelled "fit" and "1:1" rather than "fit" and
+  "actual size".
 
 **There is no delete.** Not in the popup, not as a CLI command. A note that turned out to
 be wrong gets superseded; a note that turned out to be worthless costs a few kilobytes.

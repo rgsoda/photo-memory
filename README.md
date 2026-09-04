@@ -61,8 +61,12 @@ o.launch_on_start("photomem daemon")
 o.bind("SUPER + N", "Photo memory", "photomem capture")
 
 -- ~/.config/hypr/hyprland.lua
-o.window({ class = "^photomem$" }, { float = true, center = true, size = "720 400" })
+-- Match the title as well: every photomem window shares the class, so a
+-- class-only rule pins the fullscreen image window to 720x400 too.
+o.window({ class = "^photomem$", title = "^photomem$" }, { float = true, center = true, size = "720 400" })
 ```
+
+Validate with `hyprctl reload && hyprctl configerrors`.
 
 **macOS** — not yet; see M8 in the design. The app registers its own hotkey there.
 
@@ -78,10 +82,9 @@ o.window({ class = "^photomem$" }, { float = true, center = true, size = "720 40
 
 In search: `↑`/`↓` move, `Enter` opens the note read-only, `Esc` goes back.
 
-In a note: `V` opens its image full-window, or click any thumbnail. `Z` (or a click) toggles
-fit-to-window and actual size — drag to pan — and `←`/`→` step through the note's images.
-Actual size is the one that lets you read text in a screenshot; the window itself cannot
-grow, because under Wayland the compositor owns window geometry. Notes are never
+In a note: `V` opens its image in a fullscreen window, as does clicking any thumbnail. `Z`
+(or a click) toggles fit-to-screen and 1:1 — drag to pan — `←`/`→` step through the note's
+images, and `Esc` closes it. Notes are never
 edited in the app — corrections are new notes that supersede old ones, and a typo is fixed
 by opening the file in any editor.
 
