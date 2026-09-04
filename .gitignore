@@ -1,2 +1,5 @@
 /target
 /src-tauri/gen/
+
+# The original brief. Kept locally, out of the repo.
+description.md
