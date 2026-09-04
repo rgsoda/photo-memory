@@ -14,9 +14,17 @@ photomem-images.workspace = true
 photomem-index.workspace = true
 chrono.workspace = true
 serde.workspace = true
-arboard = { version = "3", default-features = false, features = ["wayland-data-control", "image-data"] }
 base64 = "0.22"
 serde_json = "1"
 anyhow.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-single-instance = "2"
+
+# Reading an image off the clipboard is the one thing that differs by platform.
+# `wayland-data-control` is a Linux-only backend, so it is scoped here rather
+# than asked for everywhere and quietly ignored.
+[target.'cfg(target_os = "linux")'.dependencies]
+arboard = { version = "3", default-features = false, features = ["wayland-data-control", "image-data"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+arboard = { version = "3", default-features = false, features = ["image-data"] }
