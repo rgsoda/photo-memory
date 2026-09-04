@@ -129,6 +129,58 @@ async function dismiss() {
   }
 }
 
+/* ── draft ───────────────────────────────────────────────────────────────── */
+
+/** Put the caret at the end, which is where typing should continue. */
+function focusEditor() {
+  editor.focus();
+  const end = editor.value.length;
+  editor.setSelectionRange(end, end);
+}
+
+/** Write the buffer out shortly after typing stops, so Escape never loses it. */
+function queueDraftSave() {
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(async () => {
+    try {
+      await invoke("save_draft", { text: editor.value });
+    } catch (e) {
+      setStatus(String(e), "error");
+    }
+  }, DRAFT_DEBOUNCE_MS);
+}
+
+/** Bring back whatever was in the buffer when the window was last dismissed. */
+async function restoreDraft() {
+  try {
+    editor.value = await invoke("load_draft");
+  } catch (e) {
+    setStatus(String(e), "error");
+  }
+  focusEditor();
+  refreshStrip();
+}
+
+/** Show a thumbnail for each `![[name]]` the buffer currently embeds.
+ *
+ * The strip mirrors the embeds rather than tracking pastes: an embed line the
+ * user deleted by hand should take its picture with it.
+ */
+async function refreshStrip() {
+  const names = Array.from(editor.value.matchAll(EMBED), (m) => m[1]);
+  strip.hidden = names.length === 0;
+  if (!names.length) return strip.replaceChildren();
+
+  let thumbs = [];
+  try {
+    thumbs = await invoke("thumbnails", { names });
+  } catch (e) {
+    setStatus(String(e), "error");
+  }
+  const found = new Map(thumbs.map((t) => [t.name, t.thumb]));
+  strip.replaceChildren(...names.map((n) => thumbFor(n, found.get(n), names)));
+}
+
 /* ── search ──────────────────────────────────────────────────────────────── */
 
 function openSearch() {
