@@ -520,6 +520,17 @@ function triggerAt(value, caret) {
   return null;
 }
 
+/**
+ * Whether `name` would survive the parser in crates/core/src/tags.rs.
+ *
+ * Kept in step with that file by hand, which is worth it: offering to create a
+ * tag the indexer would then read differently — `#work-` is stored as `work` —
+ * would put a tag in the note that never appears in the tag list.
+ */
+function isTagName(name) {
+  return /^\p{Alphabetic}[\p{Alphabetic}\p{N}\-_/]*$/u.test(name) && !/[-_/]$/.test(name);
+}
+
 /** Open the picker over the trigger the user just typed. */
 async function openPicker(range) {
   pick = range;
@@ -584,10 +595,22 @@ async function runSearch() {
   if (pick?.kind === "tag") {
     // Filtered here rather than in SQL: the whole tag list is small, already
     // fetched, and a round trip per keystroke would be slower than the typing.
-    const typed = query.value.trim().toLowerCase();
+    const raw = query.value.trim();
+    const typed = raw.toLowerCase();
     hits = tagList
       .filter((t) => t.tag.includes(typed))
       .map((t) => ({ tag: t.tag, title: `#${t.tag}`, when: `${t.count}`, snippet: "" }));
+
+    // Every tag is new once. Offering the typed text as a row means the first
+    // use of a tag is one Enter like every later use, instead of Escape and
+    // then typing it out again past a list that was no help.
+    //
+    // Last, not first, so an existing tag stays what Enter picks: the whole
+    // point of showing this list is to stop one tag becoming five spellings of
+    // itself, and defaulting to "make a new one" would undo that.
+    if (raw && isTagName(raw) && !tagList.some((t) => t.tag === typed)) {
+      hits.push({ tag: raw, title: `#${raw}`, when: "new", snippet: "" });
+    }
   } else {
     try {
       hits = await invoke("search", { query: query.value });
@@ -600,11 +623,26 @@ async function runSearch() {
   renderResults();
 }
 
+/**
+ * Why the list is empty, which differs by what the list is.
+ *
+ * In tag mode an empty list no longer means "nothing matched" — the typed text
+ * is always offered — so it means the text could not be a tag, and saying so is
+ * more use than saying nothing matched.
+ */
+function emptyMessage() {
+  const typed = query.value.trim();
+  if (pick?.kind === "tag") {
+    return typed ? `#${typed} is not a usable tag name` : "No tags yet.";
+  }
+  return typed ? "No notes match." : "No notes yet.";
+}
+
 function renderResults() {
   if (!hits.length) {
     const li = document.createElement("li");
     li.className = "empty";
-    li.textContent = query.value.trim() ? "No notes match." : "No notes yet.";
+    li.textContent = emptyMessage();
     results.replaceChildren(li);
     return;
   }
