@@ -16,3 +16,10 @@ photomem-index = { path = "crates/index" }
 anyhow = "1"
 chrono = "0.4"
 serde = { version = "1", features = ["derive"] }
+
+# "Little" is a stated goal, so ship without debug symbols and let LLVM drop
+# what is not reachable. Takes the binary from 19M to about 9M.
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

@@ -40,16 +40,28 @@ The vault is a **separate repo** from this one — this holds the app, that hold
 capture is then as fast as every later one.
 
 **Hyprland** — Wayland has no protocol for app-registered global hotkeys, so the binding
-lives in the compositor:
+lives in the compositor.
+
+Stock Hyprland, in `hyprland.conf`:
 
 ```
 exec-once = photomem daemon
-
 bind = SUPER, N, exec, photomem capture
-
 windowrulev2 = float, class:^(photomem)$
 windowrulev2 = center, class:^(photomem)$
-windowrulev2 = stayfocused, class:^(photomem)$
+```
+
+Omarchy configures Hyprland in **Lua**, so the same thing is spread across three files:
+
+```lua
+-- ~/.config/hypr/autostart.lua
+o.launch_on_start("photomem daemon")
+
+-- ~/.config/hypr/bindings.lua
+o.bind("SUPER + N", "Photo memory", "photomem capture")
+
+-- ~/.config/hypr/hyprland.lua
+o.window({ class = "^photomem$" }, { float = true, center = true, size = "720 400" })
 ```
 
 **macOS** — not yet; see M8 in the design. The app registers its own hotkey there.
