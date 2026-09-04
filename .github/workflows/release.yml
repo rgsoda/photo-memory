@@ -1,0 +1,109 @@
+# Build the artifacts a release needs, for the two things that install them:
+# an AUR `-bin` package on Arch, and eventually a Homebrew cask on macOS.
+# Both want a versioned tarball at a stable URL with a checksum beside it.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  # So a build can be exercised without cutting a release first.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # Nothing is published if the suite is red. The tarball is the one artifact
+  # people install without looking, so it does not get to skip the tests.
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install the webview and its build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libssl-dev
+      - run: cargo test --workspace
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            name: x86_64-linux
+          - os: macos-14
+            target: aarch64-apple-darwin
+            name: aarch64-macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install the webview and its build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libssl-dev
+
+      - run: cargo build --release --target ${{ matrix.target }}
+
+      # Version comes from the tag when there is one, and from Cargo.toml
+      # otherwise, so a manual run still produces a sensibly named file.
+      - name: Work out the version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package
+        shell: bash
+        run: |
+          v='${{ steps.version.outputs.version }}'
+          dir="photomem-$v-${{ matrix.name }}"
+          mkdir "$dir"
+          cp target/${{ matrix.target }}/release/photomem "$dir/"
+          cp README.md DESIGN.md "$dir/"
+          tar czf "$dir.tar.gz" "$dir"
+          # Checksums are what a PKGBUILD and a cask both pin against, so they
+          # are generated here rather than by hand at release time.
+          shasum -a 256 "$dir.tar.gz" > "$dir.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photomem-${{ matrix.name }}
+          path: |
+            *.tar.gz
+            *.tar.gz.sha256
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Collect the checksums into one file
+        run: cat *.sha256 > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.tar.gz
+            SHA256SUMS
+          generate_release_notes: true
