@@ -76,7 +76,12 @@ o.window({ class = "^photomem$" }, { float = true, center = true, size = "720 40
 | `Ctrl+Enter` | Save and hide |
 | `Esc` | Hide, stashing the text as a draft |
 
-In search: `↑`/`↓` move, `Enter` opens the note read-only, `Esc` goes back. Notes are never
+In search: `↑`/`↓` move, `Enter` opens the note read-only, `Esc` goes back.
+
+In a note: `V` opens its image full-window, or click any thumbnail. `Z` (or a click) toggles
+fit-to-window and actual size — drag to pan — and `←`/`→` step through the note's images.
+Actual size is the one that lets you read text in a screenshot; the window itself cannot
+grow, because under Wayland the compositor owns window geometry. Notes are never
 edited in the app — corrections are new notes that supersede old ones, and a typo is fixed
 by opening the file in any editor.
 
@@ -119,4 +124,5 @@ append-only capture reasonable.
 - No tray icon, so the daemon is stopped with `pkill -x photomem`.
 - Images show in a strip under the editor, not inline in the text.
 - Search has no tag or date filters yet, and no backlinks (M4).
+- `photomem --help` opens the window instead of printing help.
 - No links (M4), sync (M5), OCR (M6).

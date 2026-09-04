@@ -256,3 +256,62 @@ kbd {
   border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
 }
+
+/* ── lightbox ──────────────────────────────────────────────────────────── */
+
+#lightbox {
+  position: fixed;
+  /* Stops above the footer so its key hints stay readable. */
+  inset: 0 0 30px 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  overflow: auto;
+  /* Opaque: a note showing through behind a screenshot makes both unreadable. */
+  background: var(--bg);
+}
+
+#lightbox[hidden] { display: none; }
+
+#lightbox-image {
+  max-width: 100%;
+  /* Leave room for the caption line below it. */
+  max-height: calc(100% - 24px);
+  object-fit: contain;
+  cursor: zoom-in;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
+}
+
+#lightbox-caption {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Thumbnails are openable, so they should look it. */
+#strip img,
+#viewer-images img { cursor: zoom-in; }
+
+/* Actual size: the image overflows and the pane scrolls, because the window
+   cannot grow to meet it (the compositor owns window geometry under Wayland). */
+#lightbox.zoomed {
+  justify-content: flex-start;
+  align-items: flex-start;
+  cursor: grab;
+}
+
+#lightbox.zoomed #lightbox-image {
+  max-width: none;
+  max-height: none;
+  cursor: grab;
+}
+
+#lightbox.zoomed:active,
+#lightbox.zoomed:active #lightbox-image { cursor: grabbing; }
+
+#lightbox.zoomed #lightbox-caption { position: sticky; left: 0; }

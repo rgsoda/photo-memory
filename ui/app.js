@@ -27,12 +27,22 @@ const CONFIRM_MS = 450;
 const HINTS = {
   capture: "<kbd>Ctrl</kbd><kbd>↵</kbd> save &nbsp; <kbd>//</kbd> search &nbsp; <kbd>Esc</kbd> dismiss",
   search: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>Esc</kbd> back",
-  viewer: "<kbd>Esc</kbd> back to results",
+  viewer: "<kbd>V</kbd> view image &nbsp; <kbd>Esc</kbd> back to results",
+  lightbox: "<kbd>Z</kbd> actual size &nbsp; <kbd>←</kbd><kbd>→</kbd> next &nbsp; <kbd>Esc</kbd> close",
+  zoomed: "drag to pan &nbsp; <kbd>Z</kbd> fit &nbsp; <kbd>Esc</kbd> close",
 };
+
+const lightbox = document.getElementById("lightbox");
+const lightboxImage = document.getElementById("lightbox-image");
+const lightboxCaption = document.getElementById("lightbox-caption");
 
 let mode = "capture";
 let hits = [];
 let selected = 0;
+/** Image names the current mode can show, and which one is open. */
+let gallery = [];
+let shown = 0;
+let zoomed = false;
 let draftTimer = null;
 let searchTimer = null;
 let statusTimer = null;
@@ -48,6 +58,60 @@ function setMode(next) {
   mode = next;
   for (const [name, pane] of Object.entries(panes)) pane.hidden = name !== next;
   hints.innerHTML = HINTS[next];
+}
+
+/* ── lightbox ────────────────────────────────────────────────────────────── */
+
+function lightboxOpen() {
+  return !lightbox.hidden;
+}
+
+async function showImage(index) {
+  if (!gallery.length) return;
+  shown = (index + gallery.length) % gallery.length;
+  const name = gallery[shown];
+
+  try {
+    lightboxImage.src = await invoke("read_image", { name });
+  } catch (e) {
+    setStatus(String(e), "error");
+    return;
+  }
+
+  setZoom(false);
+  lightboxImage.alt = name;
+  lightboxCaption.textContent =
+    gallery.length > 1 ? `${name}  ·  ${shown + 1}/${gallery.length}` : name;
+
+  if (!lightboxOpen()) {
+    lightbox.hidden = false;
+    setZoom(false);
+  }
+}
+
+/**
+ * Fit-to-window or actual size.
+ *
+ * The window cannot grow to meet the image: under Wayland the compositor owns
+ * window geometry and Hyprland declines a client-initiated resize (set_size
+ * returns Ok and nothing moves). Fitting a 1600px screenshot into a 720px
+ * window is barely better than the thumbnail, so the lightbox zooms instead —
+ * actual size with drag-to-pan, which is what reading a screenshot needs
+ * anyway, and which behaves the same on every platform.
+ */
+function setZoom(on) {
+  zoomed = on;
+  lightbox.classList.toggle("zoomed", on);
+  hints.innerHTML = on ? HINTS.zoomed : HINTS.lightbox;
+  if (!on) lightbox.scrollTo(0, 0);
+}
+
+function closeLightbox() {
+  if (!lightboxOpen()) return;
+  lightbox.hidden = true;
+  lightboxImage.removeAttribute("src");
+  setZoom(false);
+  hints.innerHTML = HINTS[mode];
 }
 
 /* ── capture ─────────────────────────────────────────────────────────────── */
@@ -97,11 +161,12 @@ async function refreshStrip() {
   }
 
   const byName = new Map(found.map((p) => [p.name, p.thumb]));
-  strip.replaceChildren(...names.map((name) => thumbFor(name, byName.get(name))));
+  const present = names.filter((n) => byName.has(n));
+  strip.replaceChildren(...names.map((name) => thumbFor(name, byName.get(name), present)));
   strip.hidden = false;
 }
 
-function thumbFor(name, thumb) {
+function thumbFor(name, thumb, names = null) {
   if (!thumb) {
     // An embed pointing at a file that is not there: better shown than hidden.
     const el = document.createElement("span");
@@ -112,7 +177,11 @@ function thumbFor(name, thumb) {
   const img = document.createElement("img");
   img.src = thumb;
   img.alt = name;
-  img.title = name;
+  img.title = `${name} — click to view full size`;
+  img.addEventListener("click", () => {
+    gallery = names ?? [name];
+    showImage(gallery.indexOf(name));
+  });
   return img;
 }
 
@@ -274,9 +343,12 @@ function showNote(note) {
   document.getElementById("viewer-title").textContent = note.title;
   document.getElementById("viewer-when").textContent = note.when;
   document.getElementById("viewer-body").textContent = note.body;
+
+  gallery = note.images.map((i) => i.name);
   document
     .getElementById("viewer-images")
-    .replaceChildren(...note.images.map((i) => thumbFor(i.name, i.thumb)));
+    .replaceChildren(...note.images.map((i) => thumbFor(i.name, i.thumb, gallery)));
+
   setMode("viewer");
   panes.viewer.focus();
 }
@@ -307,6 +379,8 @@ editor.addEventListener("paste", (e) => {
 });
 
 editor.addEventListener("keydown", (e) => {
+  // Esc belongs to the lightbox while it is open; the document handler has it.
+  if (lightboxOpen()) return;
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
     save();
@@ -319,6 +393,7 @@ editor.addEventListener("keydown", (e) => {
 query.addEventListener("input", queueSearch);
 
 query.addEventListener("keydown", (e) => {
+  if (lightboxOpen()) return;
   switch (e.key) {
     case "ArrowDown":
       e.preventDefault();
@@ -339,19 +414,49 @@ query.addEventListener("keydown", (e) => {
   }
 });
 
-// The viewer has no input of its own, so its keys are caught on the way up.
+// The lightbox and viewer have no input of their own, so their keys are caught
+// on the way up. The lightbox is checked first: it overlays every mode, and Esc
+// must close it rather than dismissing the window underneath.
 document.addEventListener("keydown", (e) => {
-  if (mode !== "viewer") return;
-  if (e.key === "Escape") {
-    e.preventDefault();
-    setMode("search");
-    query.focus();
+  if (lightboxOpen()) {
+    switch (e.key) {
+      case "Escape":
+      case "v":
+        e.preventDefault();
+        closeLightbox();
+        break;
+      case "z":
+        e.preventDefault();
+        setZoom(!zoomed);
+        break;
+      case "ArrowRight":
+        e.preventDefault();
+        showImage(shown + 1);
+        break;
+      case "ArrowLeft":
+        e.preventDefault();
+        showImage(shown - 1);
+        break;
+    }
+    return;
+  }
+
+  if (mode === "viewer") {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setMode("search");
+      query.focus();
+    } else if (e.key === "v") {
+      e.preventDefault();
+      showImage(0);
+    }
   }
 });
 
 // The window is reused rather than recreated, so every hotkey press after the
 // first arrives as this event instead of a page load.
 listen("photomem://present", () => {
+  closeLightbox();
   setMode("capture");
   restoreDraft();
   invoke("refresh").catch(() => {});
@@ -360,3 +465,29 @@ listen("photomem://present", () => {
 setMode("capture");
 restoreDraft();
 invoke("refresh").catch((e) => setStatus(String(e), "error"));
+
+/* Click the image to toggle zoom; drag to pan once it is bigger than the pane. */
+lightboxImage.addEventListener("click", (e) => {
+  e.stopPropagation();
+  setZoom(!zoomed);
+});
+
+lightbox.addEventListener("pointerdown", (e) => {
+  if (!zoomed) return;
+  const from = { x: e.clientX, y: e.clientY, left: lightbox.scrollLeft, top: lightbox.scrollTop };
+  let moved = false;
+
+  const drag = (m) => {
+    moved = true;
+    lightbox.scrollLeft = from.left - (m.clientX - from.x);
+    lightbox.scrollTop = from.top - (m.clientY - from.y);
+  };
+  const stop = () => {
+    document.removeEventListener("pointermove", drag);
+    // A drag must not also register as the click that toggles zoom back.
+    if (moved) lightboxImage.addEventListener("click", (c) => c.stopPropagation(), { once: true, capture: true });
+  };
+
+  document.addEventListener("pointermove", drag);
+  document.addEventListener("pointerup", stop, { once: true });
+});

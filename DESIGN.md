@@ -285,6 +285,19 @@ entirely in the new one and is derived by the index.
 Actions available on a displayed note: copy its `[[link]]`, open the file in `$EDITOR`,
 reveal it in a file manager, start a new note that supersedes it.
 
+**Opening an image.** `V` in the viewer, or clicking any thumbnail — including one in the
+capture strip — opens the picture over the whole window. `Z` or a click toggles between
+fit-to-window and actual size, where the pane scrolls and the image can be dragged; `←`/`→`
+move between the images in the note.
+
+Actual size matters more than it sounds: fitting a 1600px screenshot into a 720px window
+leaves it barely better than the thumbnail, and reading the text in a captured Slack thread
+is the entire reason the image is there. The obvious fix — grow the window while an image
+is open — **does not work under Wayland**: the compositor owns window geometry, and
+Hyprland declines a client-initiated resize (Tauri's `set_size` returns `Ok` and nothing
+moves). Zooming inside the window needs no compositor cooperation and behaves identically
+on macOS.
+
 **There is no delete.** Not in the popup, not as a CLI command. A note that turned out to
 be wrong gets superseded; a note that turned out to be worthless costs a few kilobytes.
 This is also honest about git: once a note is pushed, `rm` does not actually remove it —

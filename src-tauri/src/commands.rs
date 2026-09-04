@@ -241,3 +241,15 @@ mod tests {
         assert!(embedded_names("![[never closed").is_empty());
     }
 }
+
+/// The stored image at full size, for the lightbox.
+///
+/// Around 100 KB, so ~140 KB as base64 — worth it to keep the asset protocol
+/// closed and every image path going through one guarded reader.
+#[tauri::command]
+pub fn read_image(name: String) -> CmdResult<String> {
+    let vault = vault()?;
+    let bytes = vault.read_attachment(&name).ok_or_else(|| format!("no image named {name}"))?;
+    Ok(data_url(&bytes))
+}
+

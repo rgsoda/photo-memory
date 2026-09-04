@@ -47,6 +47,7 @@ fn main() {
             commands::refresh,
             commands::search,
             commands::open_note,
+            commands::read_image,
         ])
         .setup(move |app| {
             app.manage(commands::Search(std::sync::Mutex::new(open_index())));

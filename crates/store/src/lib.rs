@@ -121,12 +121,12 @@ impl Vault {
     }
 
     pub fn read_thumbnail(&self, name: &str) -> Option<Vec<u8>> {
-        // Reject anything that could climb out of the thumbnails directory: the
-        // name arrives from note text, which is not necessarily ours.
-        if name.contains('/') || name.contains('\\') || name.contains("..") {
-            return None;
-        }
-        std::fs::read(self.thumbs_dir().join(name)).ok()
+        std::fs::read(self.thumbs_dir().join(safe_name(name)?)).ok()
+    }
+
+    /// The stored image at full size, for the lightbox.
+    pub fn read_attachment(&self, name: &str) -> Option<Vec<u8>> {
+        std::fs::read(self.attachments_dir().join(safe_name(name)?)).ok()
     }
 
     /// Stash unsaved editor text. Escape must never destroy what was typed.
@@ -150,6 +150,18 @@ impl Vault {
             Err(e) => Err(e.into()),
         }
     }
+}
+
+/// Attachment names come out of note text, which is not necessarily ours: a
+/// hand-edited note could name any path on the disk. Only a bare filename is
+/// ever allowed through.
+fn safe_name(name: &str) -> Option<&str> {
+    let bad = name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+        || Path::new(name).is_absolute();
+    (!bad).then_some(name)
 }
 
 /// Write via a temp file in `scratch` and rename, so a crash mid-write cannot
@@ -208,9 +220,12 @@ mod tests {
         assert!(pa.exists() && pb.exists());
     }
 
+    /// Larger than the thumbnail edge, so the full image and its thumbnail are
+    /// genuinely different encodings.
     fn attachment(seed: u8) -> Attachment {
-        let px: Vec<u8> = (0..64 * 64 * 4).map(|i| (i as u8).wrapping_add(seed)).collect();
-        photomem_images::from_rgba(64, 64, &px, Default::default()).unwrap()
+        let (w, h) = (500u32, 400u32);
+        let px: Vec<u8> = (0..w * h * 4).map(|i| (i as u8).wrapping_add(seed)).collect();
+        photomem_images::from_rgba(w, h, &px, Default::default()).unwrap()
     }
 
     #[test]
@@ -244,11 +259,25 @@ mod tests {
     }
 
     #[test]
-    fn thumbnail_reads_refuse_to_escape_the_vault() {
+    fn reads_refuse_to_escape_the_vault() {
         let v = vault("escape");
         v.ensure().unwrap();
-        assert!(v.read_thumbnail("../../etc/passwd").is_none());
+        for bad in ["../../etc/passwd", "/etc/passwd", "sub/dir.webp", ""] {
+            assert!(v.read_thumbnail(bad).is_none(), "thumbnail {bad:?} was allowed");
+            assert!(v.read_attachment(bad).is_none(), "attachment {bad:?} was allowed");
+        }
         assert!(v.read_thumbnail("nope.webp").is_none());
+    }
+
+    #[test]
+    fn reads_back_a_stored_attachment_at_full_size() {
+        let v = vault("fullsize");
+        let a = attachment(3);
+        let name = v.save_attachment(&a, "2026-09-04").unwrap();
+
+        assert_eq!(v.read_attachment(&name).unwrap(), a.webp);
+        // The lightbox must get the image, not the thumbnail.
+        assert_ne!(v.read_attachment(&name), v.read_thumbnail(&name));
     }
 
     #[test]
