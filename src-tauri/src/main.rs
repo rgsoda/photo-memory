@@ -29,14 +29,19 @@ fn mode_from(args: impl Iterator<Item = String>) -> Mode {
 fn main() {
     let mode = mode_from(std::env::args());
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // A second `photomem capture` must not start a second app. It wakes this
         // one instead, which is the whole reason the popup feels instant.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 present(&window);
             }
-        }))
+        }));
+
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
+
+    builder
         .invoke_handler(tauri::generate_handler![
             commands::save_note,
             commands::save_draft,
@@ -54,6 +59,8 @@ fn main() {
         ])
         .setup(move |app| {
             app.manage(commands::Search(std::sync::Mutex::new(open_index())));
+            #[cfg(target_os = "macos")]
+            register_hotkey(app.handle());
 
             let window = app.get_webview_window("main").expect("main window exists");
             if let Mode::Window = mode {
@@ -77,6 +84,45 @@ fn open_index() -> photomem_index::Index {
             eprintln!("photomem: falling back to an in-memory index: {e:#}");
             photomem_index::Index::in_memory().expect("in-memory index")
         })
+}
+
+/// Register the global capture hotkey.
+///
+/// macOS only. Wayland has no protocol for an application to register a global
+/// shortcut, so on Linux the binding lives in the compositor config and this
+/// does not exist — see the README. Here it goes through Carbon's
+/// `RegisterEventHotKey`, which asks for no accessibility permission and so
+/// raises no permission prompt on first run.
+///
+/// A hotkey that will not bind is reported and shrugged off. `photomem capture`
+/// still opens the window, and a capture tool that starts with one way in is a
+/// much better failure than one that refuses to start at all.
+#[cfg(target_os = "macos")]
+fn register_hotkey(app: &tauri::AppHandle) {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+
+    let spec = photomem_config::Config::load()
+        .map(|cfg| cfg.hotkey)
+        .unwrap_or_else(|_| photomem_config::DEFAULT_HOTKEY.to_string());
+
+    let shortcut: tauri_plugin_global_shortcut::Shortcut = match spec.parse() {
+        Ok(s) => s,
+        Err(e) => return eprintln!("photomem: {spec:?} is not a usable hotkey: {e}"),
+    };
+
+    let bound = app.global_shortcut().on_shortcut(shortcut, |app, _, event| {
+        // Press and release both arrive here; without this the window would be
+        // presented twice for every capture.
+        if event.state() != ShortcutState::Pressed {
+            return;
+        }
+        if let Some(window) = app.get_webview_window("main") {
+            present(&window);
+        }
+    });
+    if let Err(e) = bound {
+        eprintln!("photomem: could not bind {spec}: {e}");
+    }
 }
 
 /// Bring the capture window up and put the cursor in it.

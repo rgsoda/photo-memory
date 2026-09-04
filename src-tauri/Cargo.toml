@@ -28,3 +28,9 @@ arboard = { version = "3", default-features = false, features = ["wayland-data-c
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 arboard = { version = "3", default-features = false, features = ["image-data"] }
+
+# Only macOS registers its own hotkey. On Linux the compositor owns the binding
+# (Wayland has no protocol for app-registered global shortcuts), so the plugin
+# would be dead weight in that binary.
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri-plugin-global-shortcut = "2"

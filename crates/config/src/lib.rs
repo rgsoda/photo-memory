@@ -13,12 +13,27 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     /// The notes repository. A separate git repo from the app itself.
     pub vault: PathBuf,
+    /// The global capture hotkey. Read on macOS only: on Linux the compositor
+    /// owns the binding, because Wayland has no protocol for an app to register
+    /// one. See DESIGN.md §7.
+    pub hotkey: String,
     pub image: ImageConfig,
 }
 
+/// Control+Option+N, not the `Super+N` the design suggests for Linux.
+///
+/// "Super" maps to Command on macOS, and a *global* Cmd+N would swallow "New"
+/// in every application on the machine. Ctrl+Alt+N keeps the mnemonic and is
+/// unbound by default.
+pub const DEFAULT_HOTKEY: &str = "Ctrl+Alt+N";
+
 impl Default for Config {
     fn default() -> Self {
-        Config { vault: home().join("photomem"), image: ImageConfig::default() }
+        Config {
+            vault: home().join("photomem"),
+            hotkey: DEFAULT_HOTKEY.to_string(),
+            image: ImageConfig::default(),
+        }
     }
 }
 
@@ -61,6 +76,10 @@ const TEMPLATE: &str = "\
 # The notes repository. Created on first save; make it a git repo to sync it.
 vault = \"{vault}\"
 
+# The global capture hotkey. macOS only — on Linux this is a compositor binding.
+# Modifiers: Ctrl, Alt, Shift, Cmd (or Super). Takes effect on restart.
+hotkey = \"{hotkey}\"
+
 [image]
 # Pasted images are scaled to this long edge and re-encoded as WebP. Measured on
 # a 4K screenshot: 1200 is 62 KB but too soft to read, 1600 is 104 KB and legible,
@@ -98,6 +117,7 @@ impl Config {
         }
         let body = TEMPLATE
             .replace("{vault}", &self.vault.display().to_string())
+            .replace("{hotkey}", &self.hotkey)
             .replace("{max_edge}", &self.image.max_edge.to_string())
             .replace("{thumb_edge}", &self.image.thumb_edge.to_string())
             .replace("{quality}", &self.image.quality.to_string());
@@ -170,6 +190,18 @@ mod tests {
         assert_eq!(opts.max_edge, 1920);
         // A nonsense quality must not reach the encoder.
         assert_eq!(opts.quality, 100.0);
+    }
+
+    #[test]
+    fn hotkey_defaults_and_can_be_overridden() {
+        let path = tmpdir("hotkey").join("config.toml");
+
+        // A config file written before this key existed must still load.
+        std::fs::write(&path, "vault = \"~/notes\"\n").unwrap();
+        assert_eq!(Config::load_from(&path).unwrap().hotkey, DEFAULT_HOTKEY);
+
+        std::fs::write(&path, "hotkey = \"Cmd+Shift+Space\"\n").unwrap();
+        assert_eq!(Config::load_from(&path).unwrap().hotkey, "Cmd+Shift+Space");
     }
 
     #[test]
