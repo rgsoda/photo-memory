@@ -14,8 +14,8 @@ Status: design agreed, no code written.
 - Capture in under two seconds from any application, without breaking flow.
 - Images come from the clipboard. Pasting a screenshot is the primary image path.
 - Atomic entries linked to each other, Obsidian-style, with backlinks.
-- **Append-only.** The app never edits an existing note; corrections are new notes that
-  supersede old ones.
+- **Append-only.** The app never edits or deletes a note. Corrections are new notes that
+  supersede old ones; nothing is ever removed.
 - Runs on Linux (Wayland/Hyprland) and macOS from one codebase.
 - All data in one plain-file repo, synced through a private GitHub repo.
 - Small: a single background process, tens of MB on disk, instant window.
@@ -117,6 +117,11 @@ On paste (Ctrl+V with an image on the clipboard):
 5. **Thumbnail** at 320 px into `.photomem/thumbs/` for the grid view.
 6. **OCR in the background** (tesseract, ~200 ms) — the result goes into the index only,
    never into the markdown. The note stays clean; the search index gets the text.
+   Languages come from config (`ocr.languages`), **defaulting to `["eng"]`**. Polish is
+   wanted eventually but adds noise and latency, so it stays a one-line config change
+   rather than a default. The index records which languages produced each attachment's
+   text, so `photomem reindex --ocr` can find and re-run only the stale ones when the
+   setting changes. Since the images are kept forever, re-OCR is always possible.
 7. Insert `![[filename]]` at the cursor; render it inline in the editor as a thumbnail.
 
 The original is **discarded**. Resolution is deliberately traded for a repo that stays small
@@ -243,6 +248,15 @@ entirely in the new one and is derived by the index.
 Actions available on a displayed note: copy its `[[link]]`, open the file in `$EDITOR`,
 reveal it in a file manager, start a new note that supersedes it.
 
+**There is no delete.** Not in the popup, not as a CLI command. A note that turned out to
+be wrong gets superseded; a note that turned out to be worthless costs a few kilobytes.
+This is also honest about git: once a note is pushed, `rm` does not actually remove it —
+it stays in history forever, and only a history rewrite would truly erase it. Offering a
+delete button would imply a guarantee the storage model cannot make.
+
+A consequence worth stating: attachments are never orphaned, so no garbage collection is
+needed.
+
 ### Browsing
 
 Two views beyond search, reachable from the search results screen:
@@ -360,11 +374,11 @@ M6 is the one to protect from being cut when the project gets boring.
 - In-app editing of any kind. Decided against: see §6. External editor plus the watcher
   is the escape hatch.
 
-**Open questions**
+**Settled**
 
-1. **Attachment garbage collection.** If a note is deleted, its images are orphaned. A
-   `photomem gc` command that reports orphans and deletes on confirmation, run manually?
-2. **OCR language set.** English only, or English + Polish? Multi-language tesseract is
-   slower and noisier; adding a second language should be a config flag, defaulting to one.
-3. **Note deletion** — presumably also out of the app, consistent with append-only:
-   `rm` plus the watcher. Confirm.
+- *In-app editing* — no. Read-only viewing, supersession for corrections (§6).
+- *Deletion* — none, at any level. Nothing is removed, so attachment GC is unnecessary (§6).
+- *OCR languages* — `["eng"]` to start, Polish later via config plus a re-OCR pass (§3).
+
+No open questions block M1. The next decision that matters is the config file's shape and
+location, which can wait until M5 (sync) needs a repo path anyway.
