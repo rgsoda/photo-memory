@@ -182,6 +182,50 @@ pub fn thumbnails(names: Vec<String>) -> CmdResult<Vec<Pasted>> {
         .collect())
 }
 
+/// One row of the timeline, with the heading it belongs under at each
+/// granularity.
+///
+/// All three labels are computed here rather than in the page: switching
+/// grouping is then a repaint with no round trip, and the UI still does no date
+/// maths — including ISO weeks, which are exactly the kind of thing a
+/// hand-rolled version gets wrong at the turn of the year.
+#[derive(serde::Serialize)]
+pub struct TimelineItem {
+    path: String,
+    title: String,
+    /// Time of day, since the date is already in the heading above.
+    at: String,
+    day: String,
+    week: String,
+    month: String,
+}
+
+#[tauri::command]
+pub fn timeline(search: State<'_, Search>) -> CmdResult<Vec<TimelineItem>> {
+    const LIMIT: usize = 2000;
+
+    let index = search.0.lock().map_err(|_| "index is poisoned".to_string())?;
+    Ok(index
+        .timeline(LIMIT)
+        .map_err(|e| format!("{e:#}"))?
+        .into_iter()
+        .map(|note| {
+            // `Datelike` is what carries iso_week; ISO years diverge from
+            // calendar years in the last days of December, which is the whole
+            // reason for asking chrono instead of formatting one by hand.
+            let iso = chrono::Datelike::iso_week(&note.created);
+            TimelineItem {
+                path: note.path.display().to_string(),
+                title: note.title,
+                at: note.created.format("%H:%M").to_string(),
+                day: note.created.format("%A %-d %B %Y").to_string(),
+                week: format!("Week {} · {}", iso.week(), iso.year()),
+                month: note.created.format("%B %Y").to_string(),
+            }
+        })
+        .collect())
+}
+
 /// One tile on the thumbnail wall.
 #[derive(serde::Serialize)]
 pub struct WallItem {

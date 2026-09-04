@@ -15,7 +15,13 @@ const panes = {
   search: document.getElementById("search"),
   viewer: document.getElementById("viewer"),
   wall: document.getElementById("wall"),
+  timeline: document.getElementById("timeline"),
 };
+
+/** The browse views `Tab` cycles through, search included. */
+const VIEWS = ["search", "wall", "timeline"];
+/** How the timeline groups its rows. `g` cycles these. */
+const GROUPINGS = ["day", "week", "month"];
 
 /** Matches the `![[name]]` embeds the app writes into a note. */
 const EMBED = /!\[\[([^\]]+)\]\]/g;
@@ -34,9 +40,10 @@ const CONFIRM_MS = 450;
 
 const HINTS = {
   capture: "<kbd>Ctrl</kbd><kbd>↵</kbd> save &nbsp; <kbd>//</kbd> search &amp; cite &nbsp; <kbd>Esc</kbd> dismiss",
-  search: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>Tab</kbd> wall &nbsp; <kbd>Esc</kbd> back",
+  search: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>Tab</kbd> browse &nbsp; <kbd>Esc</kbd> back",
   viewer: "<kbd>↑</kbd><kbd>↓</kbd> scroll &nbsp; <kbd>Tab</kbd><kbd>↵</kbd> link &nbsp; <kbd>V</kbd> image &nbsp; <kbd>Esc</kbd> back",
-  wall: "<kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> open note &nbsp; <kbd>V</kbd> image &nbsp; <kbd>Esc</kbd> back",
+  wall: "<kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> note &nbsp; <kbd>V</kbd> image &nbsp; <kbd>Tab</kbd> next &nbsp; <kbd>Esc</kbd> back",
+  timeline: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>G</kbd> group &nbsp; <kbd>Tab</kbd> next &nbsp; <kbd>Esc</kbd> back",
   pick: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> cite &nbsp; <kbd>Ctrl</kbd><kbd>↵</kbd> supersedes &nbsp; <kbd>Esc</kbd> cancel",
 };
 
@@ -53,6 +60,10 @@ let pick = null;
 /** Tiles on the thumbnail wall, and which one is under the cursor. */
 let shots = [];
 let shot = 0;
+/** Rows of the timeline, which one is selected, and how it is grouped. */
+let entries = [];
+let entry = 0;
+let grouping = "day";
 let draftTimer = null;
 let searchTimer = null;
 let statusTimer = null;
@@ -302,6 +313,98 @@ async function openShotNote() {
   } catch (e) {
     setStatus(String(e), "error");
   }
+}
+
+/* ── the timeline ────────────────────────────────────────────────────────── */
+
+async function openTimeline() {
+  setMode("timeline");
+  panes.timeline.replaceChildren();
+  try {
+    entries = await invoke("timeline");
+  } catch (e) {
+    entries = [];
+    setStatus(String(e), "error");
+  }
+  entry = 0;
+  renderTimeline();
+  panes.timeline.scrollTop = 0;
+}
+
+function renderTimeline() {
+  if (!entries.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "No notes yet.";
+    panes.timeline.replaceChildren(empty);
+    return;
+  }
+
+  const out = [];
+  let list = null;
+  let heading = null;
+
+  entries.forEach((item, i) => {
+    // The rows arrive newest first and every grouping is coarser than the
+    // ordering, so a group boundary is simply the label changing.
+    if (item[grouping] !== heading) {
+      heading = item[grouping];
+      const h = document.createElement("h2");
+      h.textContent = heading;
+      list = document.createElement("ul");
+      out.push(h, list);
+    }
+
+    const li = document.createElement("li");
+    li.setAttribute("aria-selected", String(i === entry));
+
+    const at = document.createElement("span");
+    at.className = "at";
+    at.textContent = item.at;
+    const title = document.createElement("span");
+    title.className = "title";
+    title.textContent = item.title;
+
+    li.append(at, title);
+    li.addEventListener("click", () => {
+      entry = i;
+      openEntry();
+    });
+    list.append(li);
+  });
+
+  panes.timeline.replaceChildren(...out);
+  selectedRow()?.scrollIntoView({ block: "nearest" });
+}
+
+/** The selected row, which is nested under its heading rather than a child of
+ *  the pane — so it cannot be found by index the way the wall's tiles can. */
+function selectedRow() {
+  return panes.timeline.querySelector('li[aria-selected="true"]');
+}
+
+function moveEntry(delta) {
+  if (!entries.length) return;
+  entry = Math.min(Math.max(entry + delta, 0), entries.length - 1);
+  renderTimeline();
+}
+
+async function openEntry() {
+  const item = entries[entry];
+  if (!item) return;
+  try {
+    showNote(await invoke("open_note", { path: item.path }));
+  } catch (e) {
+    setStatus(String(e), "error");
+  }
+}
+
+/** Regroup, keeping the selected note selected: the point of switching is to
+ *  see the same note in a wider or narrower context, not to lose your place. */
+function cycleGrouping() {
+  grouping = GROUPINGS[(GROUPINGS.indexOf(grouping) + 1) % GROUPINGS.length];
+  renderTimeline();
+  setStatus(`grouped by ${grouping}`);
 }
 
 /* ── citing another note ─────────────────────────────────────────────────── */
@@ -657,7 +760,7 @@ query.addEventListener("keydown", (e) => {
       // Not from the picker: there, you are part-way through writing a note.
       if (pick) break;
       e.preventDefault();
-      openWall();
+      nextView();
       break;
     case "Escape":
       e.preventDefault();
@@ -669,7 +772,14 @@ query.addEventListener("keydown", (e) => {
 
 // The viewer has no input of its own, so its keys are caught on the way up.
 document.addEventListener("keydown", (e) => {
+  // The editor and the query field handle their own keys, and their events
+  // bubble to here afterwards. Without this, one Tab in the search box would
+  // open the wall and then be read again as a Tab *on* the wall, skipping a
+  // view — the handler must not see a key that has already been acted on.
+  if (e.target === query || e.target === editor) return;
+
   if (mode === "wall") return wallKey(e);
+  if (mode === "timeline") return timelineKey(e);
   if (mode !== "viewer") return;
 
   const step = scrollStep(e);
@@ -688,6 +798,45 @@ document.addEventListener("keydown", (e) => {
     openImage(gallery[0], gallery);
   }
 });
+
+/** Move to the next browse view, wrapping back round to search. */
+function nextView() {
+  const next = VIEWS[(VIEWS.indexOf(mode) + 1) % VIEWS.length];
+  if (next === "wall") return openWall();
+  if (next === "timeline") return openTimeline();
+  openSearch();
+}
+
+function timelineKey(e) {
+  switch (e.key) {
+    case "ArrowDown":
+      e.preventDefault();
+      return moveEntry(1);
+    case "ArrowUp":
+      e.preventDefault();
+      return moveEntry(-1);
+    case "PageDown":
+      e.preventDefault();
+      return moveEntry(10);
+    case "PageUp":
+      e.preventDefault();
+      return moveEntry(-10);
+    case "Enter":
+      e.preventDefault();
+      return openEntry();
+    case "g":
+      e.preventDefault();
+      return cycleGrouping();
+    case "Tab":
+      e.preventDefault();
+      return nextView();
+    case "Escape":
+      e.preventDefault();
+      setMode("search");
+      query.focus();
+      return;
+  }
+}
 
 /** The wall is a grid, so it moves in two dimensions. */
 function wallKey(e) {
@@ -708,6 +857,9 @@ function wallKey(e) {
       // captured is the obvious thing to want.
       if (shots.length) openImage(shots[shot].name, shots.map((s) => s.name));
       return;
+    case "Tab":
+      e.preventDefault();
+      return nextView();
     case "Escape":
       e.preventDefault();
       setMode("search");

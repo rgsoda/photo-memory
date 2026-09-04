@@ -4,7 +4,7 @@ Fast visual note capture. Hotkey, type, save, gone.
 
 See [DESIGN.md](DESIGN.md) for the format and the plan. Working today: capture, clipboard
 images, full-text search, the read-only viewer, citations between notes, git sync, and the
-thumbnail wall — on Linux and macOS both. Not yet: OCR and a packaged macOS build.
+thumbnail wall and timeline — on Linux and macOS both. Not yet: OCR and a packaged macOS build.
 
 ## Install
 
@@ -130,12 +130,17 @@ icon and is started by hand. That is the rest of M8.
 | `Ctrl+Enter` | Save and hide |
 | `Esc` | Hide, stashing the text as a draft |
 
-In search: `↑`/`↓` move, `Enter` opens the note read-only, `Tab` switches to the thumbnail
-wall, `Esc` goes back.
+In search: `↑`/`↓` move, `Enter` opens the note read-only, `Esc` goes back. `Tab` cycles
+through the two browse views and back — search, wall, timeline.
 
-On the wall — every picture you have ever captured, newest first: arrows move in two
+On the **wall** — every picture you have ever captured, newest first: arrows move in two
 dimensions, `Enter` opens the note the picture belongs to, `V` opens the picture itself and
-`←`/`→` there step through the whole wall rather than one note, `Esc` returns to search.
+`←`/`→` there step through the whole wall rather than one note.
+
+On the **timeline** — every note by date: `↑`/`↓` and `PageUp`/`PageDown` move, `Enter`
+opens, and `G` cycles the grouping between day, week and month without losing your place.
+
+`Esc` returns to search from either.
 
 In the citation picker: `↑`/`↓` move, `Enter` inserts `[[that-note]]` at the cursor,
 `Ctrl+Enter` inserts it as a `supersedes:` line instead, and `Esc` cancels and leaves the
@@ -206,5 +211,6 @@ and every change to the page appears to do nothing.
 - Search has no tag or date filters yet.
 - On macOS the app runs but is not packaged: no `.app` bundle, menu bar agent or
   LaunchAgent, and `install.sh` is Linux-only (M8).
-- No timeline view yet: the thumbnail wall is built, grouping by day/week/month is not (M7).
+- Neither browse view filters by tag: nothing parses `#tags` yet, so there is nothing to
+  filter on (M7 wanted this; it needs tags first).
 - No OCR (M6).

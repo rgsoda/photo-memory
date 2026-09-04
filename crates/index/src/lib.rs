@@ -326,6 +326,19 @@ impl Index {
         rows.next().transpose().map_err(Into::into)
     }
 
+    /// Every note, newest first.
+    ///
+    /// Unlike `recent`, this is the whole vault rather than a search result, and
+    /// it carries no snippet: the timeline is read by date and title, and a
+    /// snippet per row would turn a scannable list into a wall of prose.
+    pub fn timeline(&self, limit: usize) -> Result<Vec<Ref>> {
+        let mut stmt = self.db.prepare(
+            "SELECT path, name, title, created FROM notes ORDER BY created DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit as i64], row_to_ref)?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
     fn remove_missing(&self, seen: &[String]) -> Result<usize> {
         let existing: Vec<String> = self
             .db
@@ -731,6 +744,27 @@ mod tests {
 
     fn shot_names(shots: Vec<Shot>) -> Vec<String> {
         shots.into_iter().map(|s| s.name).collect()
+    }
+
+    #[test]
+    fn the_timeline_is_every_note_newest_first() {
+        let (dir, mut ix) = vault_with("timeline", &[]);
+        write(&dir, "january", "2026-01-05T10:00:00+01:00", "January\nbody");
+        write(&dir, "march", "2026-03-05T10:00:00+01:00", "March\nbody");
+        write(&dir, "february", "2026-02-05T10:00:00+01:00", "February\nbody");
+        ix.sync(&dir).unwrap();
+
+        assert_eq!(names(ix.timeline(50).unwrap()), ["march", "february", "january"]);
+    }
+
+    #[test]
+    fn the_timeline_includes_notes_a_search_would_not_match() {
+        // It is a browse, not a query: a note with no words in common with
+        // anything still has a place in it.
+        let (dir, mut ix) = vault_with("timeline-all", &[]);
+        write(&dir, "wordless", "2026-01-05T10:00:00+01:00", "?????");
+        ix.sync(&dir).unwrap();
+        assert_eq!(ix.timeline(50).unwrap().len(), 1);
     }
 
     #[test]

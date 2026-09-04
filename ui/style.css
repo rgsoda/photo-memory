@@ -140,7 +140,8 @@ kbd {
 #capture[hidden],
 #search[hidden],
 #viewer[hidden],
-#wall[hidden] {
+#wall[hidden],
+#timeline[hidden] {
   display: none;
 }
 
@@ -274,6 +275,71 @@ kbd {
   grid-column: 1 / -1;
   margin: 0;
   padding: 12px;
+  color: var(--muted);
+}
+
+/* ── the timeline ───────────────────────────────────────────────────────── */
+
+#timeline {
+  flex: 1;
+  min-height: 0;
+  display: block;
+  overflow-y: auto;
+  background: var(--surface);
+  /* No top padding: it sits above the sticky heading in the scroll container,
+     so scrolled rows would show through the gap. */
+  padding: 0 0 12px;
+}
+
+/* Sticky, so you always know which day you are looking at while scrolling —
+   which is the entire question the timeline answers. */
+#timeline h2 {
+  position: sticky;
+  top: 0;
+  margin: 0;
+  padding: 8px 20px 4px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+#timeline ul {
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+}
+
+#timeline li {
+  display: flex;
+  gap: 12px;
+  padding: 5px 20px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+}
+
+#timeline li[aria-selected="true"] {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+#timeline .at {
+  flex: none;
+  width: 42px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+#timeline .title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#timeline .empty {
+  padding: 12px 20px;
   color: var(--muted);
 }
 

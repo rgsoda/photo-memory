@@ -444,8 +444,13 @@ guess.
 
 **M6 — OCR.** tesseract on paste, OCR text into the index. *The differentiator.*
 
-**M7 — Browsing.** Timeline grouping and the thumbnail wall. The wall is done; the
-timeline is not.
+**M7 — Browsing.** Timeline grouping and the thumbnail wall. Both done, except filtering by
+tag: nothing parses `#tags` yet, so there is nothing to filter on.
+`Tab` cycles search → wall → timeline → search, one key for all of it. The three group
+labels (day, week, month) are computed in Rust and sent with every row, so switching
+grouping is a repaint with no round trip and the page still does no date maths — ISO weeks
+in particular are the sort of thing a hand-rolled version gets wrong only at the turn of the
+year, which is the worst time to find out.
 The index grew an `attachments` table, populated from `![[name]]` exactly as `links` is from
 `[[name]]` — schema version 2, so an existing index is thrown away and rebuilt rather than
 left with an empty table it would never fill. One row per *picture*, not per embed: the same
