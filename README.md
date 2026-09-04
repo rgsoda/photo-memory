@@ -2,18 +2,40 @@
 
 Fast visual note capture. Hotkey, type, save, gone.
 
-See [DESIGN.md](DESIGN.md) for the format and the plan. This is **M1**: capture only —
-no images, no search, no sync yet.
+See [DESIGN.md](DESIGN.md) for the format and the plan. Working today: capture, clipboard
+images, full-text search, the read-only viewer, and citations between notes. Not yet: sync,
+OCR, macOS.
 
-## Build
+## Install (Linux)
 
-Needs Rust and, on Linux, `webkit2gtk-4.1`, `gtk3` and `libsoup3`. There is no npm step;
-the UI is plain HTML in `ui/`.
+```bash
+git clone git@github.com:rgsoda/photo-memory.git
+cd photo-memory
+./install.sh
+```
+
+That checks the build dependencies, builds, and puts the binary in `~/.local/bin`. It never
+touches your compositor config or your shell profile — it prints what to add and leaves
+those files to you.
+
+| | |
+|---|---|
+| `./install.sh --check` | report what is missing, build nothing |
+| `./install.sh --deps` | install the system packages first (uses `sudo`) |
+| `./install.sh --prefix DIR` | install to `DIR/bin` instead |
+
+### Or by hand
+
+Needs Rust and, on Linux, `webkit2gtk-4.1`, `gtk3`, `libsoup3` and `librsvg`. There is no
+npm step; the UI is plain HTML in `ui/` and is embedded into the binary at build time.
 
 ```bash
 cargo build --release
 install -Dm755 target/release/photomem ~/.local/bin/photomem
 ```
+
+The one dependency that matters is the webview: Tauri renders the UI with WebKitGTK rather
+than shipping a browser, which is what keeps the binary around 11 MB.
 
 ## Configure
 
