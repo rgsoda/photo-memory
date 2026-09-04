@@ -263,7 +263,13 @@ make quick && ./target/quick/photomem capture
 ```
 
 `make` on its own does that. `make check` compiles without producing a binary, `make
-release` builds the shipped one.
+release` builds the shipped one, and `make install` puts it in `~/.local/bin` and restarts
+a running daemon onto it.
+
+That restart matters more than it sounds. photomem is single-instance: the first process
+to start claims a name on the session bus, and every later `photomem capture` is handed to
+*that* process, whatever binary it came from. Until the old daemon dies a new build changes
+nothing, and it looks exactly like a build that silently did not happen.
 
 `release` sets `lto = true` and `codegen-units = 1` to get the binary from 20 MB to 11 MB.
 Both are worth it in a shipped binary and neither is worth it in a rebuild loop: they are

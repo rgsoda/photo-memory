@@ -7,7 +7,10 @@
 # `release`.
 
 .DEFAULT_GOAL := quick
-.PHONY: release quick check
+.PHONY: release quick check install
+
+PREFIX ?= $(HOME)/.local
+BINDIR := $(DESTDIR)$(PREFIX)/bin
 
 # The shipped binary: small and slow to build. What install.sh and the release
 # CI produce.
@@ -23,3 +26,25 @@ quick:
 # Does it compile. No binary comes out of this.
 check:
 	cargo check --profile quick
+
+# Install the release binary and put the running daemon on it.
+#
+# The restart is the point. photomem is single-instance: the first process to
+# start claims a name on the session bus, and every later `photomem capture`
+# is handed to *that* process, whichever binary it came from. So a new build
+# changes nothing at all until the old daemon dies — it looks exactly like a
+# build that silently did not happen.
+#
+# Only restarted if one was already running, so this never starts a daemon on
+# a machine that had chosen not to have one. install.sh is still the thing to
+# point a new user at: it checks build dependencies and explains the hotkey.
+install: release
+	install -Dm755 target/release/photomem $(BINDIR)/photomem
+	@if pgrep -x photomem >/dev/null; then \
+		pkill -x photomem; \
+		sleep 1; \
+		setsid $(BINDIR)/photomem daemon >/dev/null 2>&1 </dev/null & \
+		echo "restarted the daemon on $(BINDIR)/photomem"; \
+	else \
+		echo "installed to $(BINDIR)/photomem; no daemon was running"; \
+	fi
