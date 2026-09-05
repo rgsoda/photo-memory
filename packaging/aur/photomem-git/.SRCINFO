@@ -1,6 +1,6 @@
 pkgbase = photomem-git
 	pkgdesc = Fast visual note capture — hotkey, type, save, gone (git version)
-	pkgver = r45.a5ce428
+	pkgver = r46.84d3061
 	pkgrel = 1
 	url = https://github.com/rgsoda/photo-memory
 	arch = x86_64
