@@ -1,0 +1,23 @@
+pkgbase = photomem-git
+	pkgdesc = Fast visual note capture — hotkey, type, save, gone (git version)
+	pkgver = r45.a5ce428
+	pkgrel = 1
+	url = https://github.com/rgsoda/photo-memory
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = git
+	makedepends = cargo
+	makedepends = pkgconf
+	depends = webkit2gtk-4.1
+	depends = gtk3
+	depends = libsoup3
+	depends = librsvg
+	provides = photomem
+	conflicts = photomem
+	conflicts = photomem-bin
+	options = !lto
+	source = photomem::git+https://github.com/rgsoda/photo-memory.git
+	sha256sums = SKIP
+
+pkgname = photomem-git
