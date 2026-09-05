@@ -5,6 +5,8 @@
 //! and would otherwise produce a syntax error instead of results. Every term is
 //! therefore quoted and given a prefix `*`.
 
+use chrono::{Days, Local, Months, NaiveDate};
+
 /// `None` when there is nothing to search for, which callers read as "show
 /// recent notes" rather than "no results".
 pub fn to_fts_query(input: &str) -> Option<String> {
@@ -54,22 +56,45 @@ mod tests {
     }
 }
 
-/// A search as typed: `#tag`s narrow it, everything else is text to match.
+/// A search as typed: `#tag`s and `since:`/`before:` narrow it, the rest is
+/// text to match.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Query {
     /// Lower-cased and without the `#`, which is how the index stores them.
     pub tags: Vec<String>,
-    /// `None` when only tags were typed, which callers read as "everything
-    /// carrying these" rather than "no results".
+    /// Inclusive lower bound on the note's own calendar date.
+    pub since: Option<NaiveDate>,
+    /// Exclusive upper bound, so `before:2026-03` means "up to March".
+    pub before: Option<NaiveDate>,
+    /// `None` when only filters were typed, which callers read as "everything
+    /// matching these" rather than "no results".
     pub text: Option<String>,
 }
 
-/// Split what was typed into tag filters and search text.
+/// Split what was typed into filters and search text.
 pub fn parse(input: &str) -> Query {
+    parse_on(input, Local::now().date_naive())
+}
+
+/// `today` is a parameter so the tests are not written against the calendar.
+fn parse_on(input: &str, today: NaiveDate) -> Query {
     let mut tags: Vec<String> = Vec::new();
     let mut words: Vec<&str> = Vec::new();
+    let mut since = None;
+    let mut before = None;
 
     for token in input.split_whitespace() {
+        // A bound that cannot be understood falls through to the text, on the
+        // same reasoning as `#404`: silently returning nothing is worse than
+        // searching for what was actually typed.
+        if let Some(d) = token.strip_prefix("since:").and_then(|v| parse_date(v, today)) {
+            since = Some(d);
+            continue;
+        }
+        if let Some(d) = token.strip_prefix("before:").and_then(|v| parse_date(v, today)) {
+            before = Some(d);
+            continue;
+        }
         match token.strip_prefix('#') {
             // The same rule that put them in the index: a tag starts with a
             // letter. `#404` typed into a search is a number being looked for,
@@ -84,7 +109,41 @@ pub fn parse(input: &str) -> Query {
         }
     }
 
-    Query { tags, text: to_fts_query(&words.join(" ")) }
+    Query { tags, since, before, text: to_fts_query(&words.join(" ")) }
+}
+
+/// A date written into a search, resolved against `today`.
+///
+/// Absolute at three precisions, because "March" is as natural a thing to type
+/// as a full date, and a month or a year names its first day. Relative forms
+/// exist because the question is usually "the last week or so", asked in the
+/// middle of typing something else.
+fn parse_date(value: &str, today: NaiveDate) -> Option<NaiveDate> {
+    match value {
+        "today" => return Some(today),
+        "yesterday" => return today.pred_opt(),
+        _ => {}
+    }
+
+    let count = |suffix: char| value.strip_suffix(suffix).and_then(|n| n.parse::<u32>().ok());
+    if let Some(n) = count('d') {
+        return today.checked_sub_days(Days::new(n as u64));
+    }
+    if let Some(n) = count('w') {
+        return today.checked_sub_days(Days::new(n as u64 * 7));
+    }
+    // Months, not thirty-day blocks: "three months ago" means the same day of
+    // the month, which is what anyone counting back on a calendar would land on.
+    if let Some(n) = count('m') {
+        return today.checked_sub_months(Months::new(n));
+    }
+
+    match value.split('-').collect::<Vec<_>>().as_slice() {
+        [y] => NaiveDate::from_ymd_opt(y.parse().ok()?, 1, 1),
+        [y, m] => NaiveDate::from_ymd_opt(y.parse().ok()?, m.parse().ok()?, 1),
+        [y, m, d] => NaiveDate::from_ymd_opt(y.parse().ok()?, m.parse().ok()?, d.parse().ok()?),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -118,5 +177,47 @@ mod query_tests {
     fn trailing_punctuation_and_case_match_how_tags_are_stored() {
         assert_eq!(parse("#Kafka/").tags, ["kafka"]);
         assert_eq!(parse("#work #WORK").tags, ["work"]);
+    }
+
+    fn day(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    #[test]
+    fn absolute_dates_at_three_precisions() {
+        let t = day(2026, 9, 5);
+        assert_eq!(parse_on("since:2026-03-11", t).since, Some(day(2026, 3, 11)));
+        // A month and a year name their first day, so `before:2026-03` is
+        // "up to March" rather than "up to the end of March".
+        assert_eq!(parse_on("since:2026-03", t).since, Some(day(2026, 3, 1)));
+        assert_eq!(parse_on("before:2026", t).before, Some(day(2026, 1, 1)));
+    }
+
+    #[test]
+    fn relative_dates_are_resolved_against_today() {
+        let t = day(2026, 9, 5);
+        assert_eq!(parse_on("since:today", t).since, Some(t));
+        assert_eq!(parse_on("since:yesterday", t).since, Some(day(2026, 9, 4)));
+        assert_eq!(parse_on("since:7d", t).since, Some(day(2026, 8, 29)));
+        assert_eq!(parse_on("since:2w", t).since, Some(day(2026, 8, 22)));
+        // Calendar months, so the day of the month is kept.
+        assert_eq!(parse_on("since:3m", t).since, Some(day(2026, 6, 5)));
+    }
+
+    #[test]
+    fn a_bound_is_a_filter_and_not_also_search_text() {
+        let q = parse_on("since:2026-01 #work kafka", day(2026, 9, 5));
+        assert_eq!(q.since, Some(day(2026, 1, 1)));
+        assert_eq!(q.tags, ["work"]);
+        assert_eq!(q.text.unwrap(), "\"kafka\"*");
+    }
+
+    #[test]
+    fn a_bound_that_makes_no_sense_is_searched_for_rather_than_dropped() {
+        // Same reasoning as `#404`: a filter nobody can parse must not quietly
+        // return nothing.
+        let q = parse_on("since:soon", day(2026, 9, 5));
+        assert_eq!(q.since, None);
+        assert!(q.text.is_some());
     }
 }

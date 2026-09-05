@@ -485,20 +485,19 @@ impl Index {
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<Hit>> {
         let q = query::parse(query);
         match &q.text {
-            Some(fts) => self.matching(fts, &q.tags, limit),
-            None => self.recent(&q.tags, limit),
+            Some(fts) => self.matching(fts, &q, limit),
+            None => self.recent(&q, limit),
         }
     }
 
-    fn recent(&self, tags: &[String], limit: usize) -> Result<Vec<Hit>> {
+    fn recent(&self, q: &Query, limit: usize) -> Result<Vec<Hit>> {
+        let (clauses, mut args) = filters(q);
         let sql = format!(
             "SELECT n.path, n.title, n.created, substr(f.body, 1, 160)
              FROM notes n JOIN notes_fts f ON f.path = n.path
-             WHERE 1 = 1{}
-             ORDER BY n.created DESC LIMIT ?",
-            tag_clauses(tags)
+             WHERE 1 = 1{clauses}
+             ORDER BY n.created DESC LIMIT ?"
         );
-        let mut args = tag_args(tags);
         args.push(Value::Integer(limit as i64));
 
         let mut stmt = self.db.prepare(&sql)?;
@@ -509,19 +508,19 @@ impl Index {
     /// bm25 takes one weight per column, *including* the unindexed `path`, so
     /// the weights below read path, title, body. A note titled after a thing is
     /// worth more than one that mentions it in passing.
-    fn matching(&self, fts: &str, tags: &[String], limit: usize) -> Result<Vec<Hit>> {
+    fn matching(&self, fts: &str, q: &Query, limit: usize) -> Result<Vec<Hit>> {
+        let (clauses, filter_args) = filters(q);
         let sql = format!(
             "SELECT f.path, n.title, n.created,
                     snippet(notes_fts, 2, '»', '«', '…', 12),
                     bm25(notes_fts, 0.0, 4.0, 1.0, 0.5)
              FROM notes_fts f JOIN notes n ON n.path = f.path
-             WHERE notes_fts MATCH ?{}
+             WHERE notes_fts MATCH ?{clauses}
              ORDER BY bm25(notes_fts, 0.0, 4.0, 1.0, 0.5)
-             LIMIT ?",
-            tag_clauses(tags)
+             LIMIT ?"
         );
         let mut args = vec![Value::Text(fts.to_string())];
-        args.append(&mut tag_args(tags));
+        args.extend(filter_args);
         // Over-fetch so the recency boost has something to reorder.
         args.push(Value::Integer((limit * 4) as i64));
 
@@ -549,22 +548,39 @@ impl Index {
     }
 }
 
-/// One `EXISTS` per tag, so several tags narrow the search rather than widen it.
+/// The `WHERE` fragments and the arguments that go with them, built together so
+/// the placeholders and the values cannot drift apart.
 ///
-/// A tag matches its children too: `#work` finds a note tagged `#work/kafka`.
-/// That is what makes the hierarchy a second grouping axis rather than a naming
-/// convention (DESIGN.md §2), and it costs one `LIKE` against an indexed column.
-fn tag_clauses(tags: &[String]) -> String {
-    tags.iter()
-        .map(|_| {
-            " AND EXISTS (SELECT 1 FROM tags t WHERE t.from_path = n.path              AND (t.tag = ? OR t.tag LIKE ? || '/%'))"
-        })
-        .collect()
-}
+/// One `EXISTS` per tag, so several tags narrow rather than widen. A tag matches
+/// its children too — `#work` finds `#work/kafka` — which is what makes the
+/// hierarchy a second grouping axis rather than a naming convention
+/// (DESIGN.md §2), and it costs one `LIKE` against an indexed column.
+fn filters(q: &Query) -> (String, Vec<Value>) {
+    let mut sql = String::new();
+    let mut args = Vec::new();
 
-/// Each tag twice over, matching the two placeholders `tag_clauses` writes.
-fn tag_args(tags: &[String]) -> Vec<Value> {
-    tags.iter().flat_map(|t| [Value::Text(t.clone()), Value::Text(t.clone())]).collect()
+    for tag in &q.tags {
+        sql.push_str(" AND EXISTS (SELECT 1 FROM tags t WHERE t.from_path = n.path");
+        sql.push_str(" AND (t.tag = ? OR t.tag LIKE ? || '/%'))");
+        args.push(Value::Text(tag.clone()));
+        args.push(Value::Text(tag.clone()));
+    }
+
+    // Compared on the date as written rather than on the whole timestamp.
+    // `created` carries a UTC offset, so two notes either side of a daylight
+    // saving change do not compare correctly as strings — and "since the 5th"
+    // means the 5th where you were, which is exactly what the first ten
+    // characters say.
+    if let Some(day) = q.since {
+        sql.push_str(" AND substr(n.created, 1, 10) >= ?");
+        args.push(Value::Text(day.to_string()));
+    }
+    if let Some(day) = q.before {
+        sql.push_str(" AND substr(n.created, 1, 10) < ?");
+        args.push(Value::Text(day.to_string()));
+    }
+
+    (sql, args)
 }
 
 /// The `[[link]]` target for a note: its filename without the `.md`.
@@ -1064,6 +1080,43 @@ mod tests {
         let hits = ix.search("#work #urgent", 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].title, "Both");
+    }
+
+    #[test]
+    fn a_date_bound_narrows_the_search() {
+        let (dir, mut ix) = vault_with("date-filter", &[]);
+        // Deliberately different UTC offsets, which is where comparing whole
+        // timestamps as strings would go wrong.
+        write(&dir, "old", "2026-01-05T10:00:00+01:00", "Old note\nrebalance");
+        write(&dir, "new", "2026-08-05T10:00:00+02:00", "New note\nrebalance");
+        ix.sync(&dir).unwrap();
+
+        assert_eq!(ix.search("rebalance", 10).unwrap().len(), 2);
+
+        let after = ix.search("since:2026-06 rebalance", 10).unwrap();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].title, "New note");
+
+        let upto = ix.search("before:2026-06 rebalance", 10).unwrap();
+        assert_eq!(upto.len(), 1);
+        assert_eq!(upto[0].title, "Old note");
+
+        // The two compose into a window, and this one holds neither note.
+        assert!(ix.search("since:2026-06 before:2026-07 rebalance", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_date_bound_needs_no_search_text_and_composes_with_a_tag() {
+        let (dir, mut ix) = vault_with("date-only", &[]);
+        write(&dir, "old", "2026-01-05T10:00:00+01:00", "Old\n#work one");
+        write(&dir, "new", "2026-08-05T10:00:00+02:00", "New\n#work two");
+        write(&dir, "newer", "2026-08-06T10:00:00+02:00", "Newer\n#home three");
+        ix.sync(&dir).unwrap();
+
+        assert_eq!(ix.search("since:2026-06", 10).unwrap().len(), 2);
+        let hits = ix.search("since:2026-06 #work", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "New");
     }
 
     #[test]

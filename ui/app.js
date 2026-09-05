@@ -41,7 +41,7 @@ const CONFIRM_MS = 450;
 
 const HINTS = {
   capture: "<kbd>Ctrl</kbd><kbd>↵</kbd> save &nbsp; <kbd>//</kbd> search &amp; cite &nbsp; <kbd>Esc</kbd> dismiss",
-  search: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>#tag</kbd> filter &nbsp; <kbd>Tab</kbd> browse &nbsp; <kbd>Esc</kbd> back",
+  search: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>#tag</kbd><kbd>since:</kbd> filter &nbsp; <kbd>Tab</kbd> browse &nbsp; <kbd>Esc</kbd> back",
   viewer: "<kbd>↑</kbd><kbd>↓</kbd> scroll &nbsp; <kbd>Tab</kbd><kbd>↵</kbd> link &nbsp; <kbd>V</kbd> image &nbsp; <kbd>Esc</kbd> back",
   wall: "<kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> note &nbsp; <kbd>V</kbd> image &nbsp; <kbd>T</kbd> tag &nbsp; <kbd>Tab</kbd> next &nbsp; <kbd>Esc</kbd> back",
   timeline: "<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>G</kbd> group &nbsp; <kbd>T</kbd> tag &nbsp; <kbd>Tab</kbd> next &nbsp; <kbd>Esc</kbd> back",
