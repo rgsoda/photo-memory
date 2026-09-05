@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=photomem
+GenericName=Visual note capture
+Comment=Capture a note with a picture in it, fast
+# The window is normally reached by a compositor binding; this entry is for
+# launchers and for the desktops that have no binding of their own.
+Exec=photomem capture
+Icon=photomem
+Terminal=false
+Categories=Utility;TextEditor;
+Keywords=note;notes;screenshot;capture;clipboard;
+StartupNotify=false

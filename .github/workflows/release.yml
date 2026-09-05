@@ -78,7 +78,13 @@ jobs:
           dir="photomem-$v-${{ matrix.name }}"
           mkdir "$dir"
           cp target/${{ matrix.target }}/release/photomem "$dir/"
-          cp README.md DESIGN.md "$dir/"
+          cp README.md DESIGN.md LICENSE "$dir/"
+          # A distro package has to install a licence, a desktop entry and
+          # icons, and it should not have to clone the repo to find them.
+          cp packaging/photomem.desktop "$dir/"
+          mkdir -p "$dir/icons"
+          cp src-tauri/icons/32x32.png src-tauri/icons/128x128.png \
+             src-tauri/icons/icon.png "$dir/icons/"
           tar czf "$dir.tar.gz" "$dir"
           # Checksums are what a PKGBUILD and a cask both pin against, so they
           # are generated here rather than by hand at release time.

@@ -1,0 +1,66 @@
+# Maintainer: Rafal Galczynski <rafalgalczynski@gmail.com>
+
+# Builds whatever is on main right now. This is the package to have while the
+# thing is still moving; photomem-bin tracks tagged releases and does not make
+# you compile a webview binding on every update.
+
+pkgname=photomem-git
+_pkgname=photomem
+pkgver=r0.0000000
+pkgrel=1
+pkgdesc="Fast visual note capture — hotkey, type, save, gone (git version)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/rgsoda/photo-memory"
+license=('MIT')
+# librsvg is not linked, it is dlopened: gdk-pixbuf loads it to draw SVG, and
+# without it the window comes up without its icon rather than failing loudly.
+depends=('webkit2gtk-4.1' 'gtk3' 'libsoup3' 'librsvg')
+makedepends=('git' 'cargo' 'pkgconf')
+provides=("$_pkgname")
+conflicts=("$_pkgname" "$_pkgname-bin")
+source=("$_pkgname::git+$url.git")
+sha256sums=('SKIP')
+options=('!lto')   # the release profile sets its own; leave it to Cargo.toml
+
+pkgver() {
+    cd "$_pkgname"
+    # No tags yet, so the revision count and hash. Once a version is tagged
+    # this switches itself over to describing from the tag.
+    if git describe --long --tags >/dev/null 2>&1; then
+        git describe --long --tags | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
+    else
+        printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+    fi
+}
+
+build() {
+    cd "$_pkgname"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo build --release --locked
+}
+
+check() {
+    cd "$_pkgname"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    # One test asserted the machine's timezone once. It does not any more, and
+    # a package build is exactly where that would bite again.
+    cargo test --release --locked --workspace
+}
+
+package() {
+    cd "$_pkgname"
+    install -Dm755 "target/release/$_pkgname" "$pkgdir/usr/bin/$_pkgname"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+    install -Dm644 DESIGN.md "$pkgdir/usr/share/doc/$pkgname/DESIGN.md"
+    install -Dm644 "packaging/$_pkgname.desktop" \
+        "$pkgdir/usr/share/applications/$_pkgname.desktop"
+    for size in 32 128; do
+        install -Dm644 "src-tauri/icons/${size}x${size}.png" \
+            "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/$_pkgname.png"
+    done
+    install -Dm644 src-tauri/icons/icon.png \
+        "$pkgdir/usr/share/icons/hicolor/512x512/apps/$_pkgname.png"
+}
