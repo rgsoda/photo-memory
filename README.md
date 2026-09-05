@@ -184,8 +184,40 @@ To start it at login, `./install.sh` prints a `~/Library/LaunchAgents` plist to 
 the `launchctl load` line for it. As with the compositor config on Linux, it prints and
 leaves the file to you.
 
-Still not packaged: there is no `.app` bundle or signed release, so it is a binary on your
-PATH rather than something in Applications. That is what remains of M8.
+### A double-clickable app, without an Apple account
+
+`make bundle` produces `target/release/bundle/macos/photomem.app`, ad-hoc signed. It needs
+the Tauri CLI once: `cargo install tauri-cli`.
+
+No Apple Developer account is involved, and none is needed. Two things get run together
+here and they are not the same:
+
+- **Signing** is required on Apple Silicon — an unsigned arm64 binary will not run at all.
+  An *ad-hoc* signature (`codesign --sign -`) satisfies that, costs nothing and needs no
+  account. `make bundle` does it. It is not decoration: Tauri leaves the bundle carrying
+  only the linker's signature on the inner binary, which Gatekeeper reads as a bundle
+  whose resources have gone missing.
+- **Notarisation** is the part that needs the paid account, and it only matters for an app
+  that reaches a Mac with a quarantine flag on it — which is what a browser download,
+  AirDrop or a mail attachment sets.
+
+So an app you built on the machine you run it on has no quarantine flag and opens
+normally. `spctl -a` will still say `rejected`; that is it reporting the app is not
+notarised, not a prediction that it will refuse to open.
+
+If you do carry the `.app` to another Mac it will be quarantined there and Gatekeeper will
+block it. Either strip the flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/photomem.app
+```
+
+or, the first time only, right-click the app and choose **Open** — that dialog has a button
+the double-click one does not.
+
+For something that lives in the menu bar and answers a hotkey, `./install.sh` plus the
+LaunchAgent is honestly the better route. The bundle is there for when you want it in
+Applications.
 
 ## The status bar icon
 
@@ -370,7 +402,8 @@ need is whether it compiles.
 ## Not there yet
 
 - Images show in a strip under the editor, not inline in the text.
-- No `.app` bundle or signed macOS release: `install.sh` puts a binary on your PATH and
-  prints a LaunchAgent to write, rather than producing something for Applications (M8).
+- The macOS `.app` is ad-hoc signed, not notarised, so it is fine on machines you build on
+  but Gatekeeper stops it on any Mac it is copied to until the quarantine flag is removed.
+  Notarising needs a paid Apple account (M8).
 - Tags are inline text, so `#ff0000` in a note about CSS becomes a tag. `#1234` and
   `# heading` do not.

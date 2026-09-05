@@ -484,9 +484,9 @@ filename because there the filename is the information.
 Done but for the packaging. The hotkey registers through Carbon, so no accessibility
 prompt; the activation policy is set to Accessory at runtime rather than by an
 `Info.plist` key, so it holds however the binary was started and not only for a bundled
-build; `install.sh` covers macOS and prints a LaunchAgent to write. What is left is an
-`.app` bundle and a signed release — the difference between a binary on your PATH and
-something in Applications.
+build; `install.sh` covers macOS and prints a LaunchAgent to write; `make bundle` produces an
+ad-hoc signed `.app`. What is left is notarisation, which needs a paid Apple account and
+only matters for a Mac the app is copied to rather than built on.
 
 M1–M4 is the smallest thing worth using daily. M5 can wait longer than it feels like it can;
 M6 is the one to protect from being cut when the project gets boring.

@@ -7,7 +7,7 @@
 # `release`.
 
 .DEFAULT_GOAL := quick
-.PHONY: release quick check install
+.PHONY: release quick check install bundle
 
 PREFIX ?= $(HOME)/.local
 BINDIR := $(DESTDIR)$(PREFIX)/bin
@@ -48,3 +48,22 @@ install: release
 	else \
 		echo "installed to $(BINDIR)/photomem; no daemon was running"; \
 	fi
+
+# A double-clickable macOS .app. Needs the Tauri CLI once: cargo install tauri-cli.
+#
+# The codesign line is not optional and is also not an Apple account. Two
+# different things get confused here: *signing* is required on Apple Silicon,
+# where an unsigned arm64 binary will not run at all, and an ad-hoc signature
+# ("--sign -", meaning "unaltered since built") satisfies it for free.
+# *Notarisation* is the one that costs, and it only matters for an app that
+# reaches a Mac carrying a quarantine flag. A local build carries none.
+#
+# Tauri leaves the bundle with only the linker's own signature on the inner
+# binary, which Gatekeeper reads as a bundle whose resources are missing. This
+# re-signs the bundle properly.
+APP := target/release/bundle/macos/photomem.app
+
+bundle:
+	cargo tauri build --bundles app
+	codesign --force --deep --sign - $(APP)
+	@echo "built and ad-hoc signed $(APP)"
