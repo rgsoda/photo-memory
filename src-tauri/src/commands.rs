@@ -108,6 +108,9 @@ fn report<R: Runtime>(app: &tauri::AppHandle<R>, text: &str, is_error: bool) {
         eprintln!("photomem: {text}");
     }
     let _ = app.emit("photomem://sync", (text, is_error));
+    // The window is usually gone by the time a push finishes, so the tray is
+    // where this actually gets read.
+    crate::tray::set_status(app, text, is_error);
 }
 
 #[tauri::command]

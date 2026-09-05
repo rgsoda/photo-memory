@@ -28,6 +28,48 @@ const ICON: &[u8] = include_bytes!("../icons/tray/tray-template.png");
 const CAPTURE: &str = "New note";
 const QUIT: &str = "Quit photomem";
 
+/// The last thing sync did, for the tray to show.
+///
+/// `None` until something has synced, because a vault that is not a git repo
+/// never will, and a permanent "not synced" would be a warning about a choice
+/// the user made deliberately.
+fn status_cell() -> &'static std::sync::Mutex<Option<String>> {
+    static STATUS: std::sync::OnceLock<std::sync::Mutex<Option<String>>> =
+        std::sync::OnceLock::new();
+    STATUS.get_or_init(Default::default)
+}
+
+fn status() -> Option<String> {
+    status_cell().lock().ok().and_then(|s| s.clone())
+}
+
+/// The line the tray shows for a sync result.
+///
+/// Carries a clock time because the useful question about sync is not what it
+/// did but how long ago — "synced" with no time is indistinguishable from
+/// "synced, an hour before the network went away".
+fn status_line(text: &str, is_error: bool, at: &str) -> String {
+    let mark = if is_error { "⚠ " } else { "" };
+    format!("{mark}{text} · {at}")
+}
+
+/// Record what sync just did and show it.
+///
+/// Silent-but-visible, per DESIGN.md §5: a failure belongs in the bar, never in
+/// a modal that interrupts a capture.
+pub fn set_status<R: tauri::Runtime>(app: &tauri::AppHandle<R>, text: &str, is_error: bool) {
+    let at = chrono::Local::now().format("%H:%M").to_string();
+    if let Ok(mut cell) = status_cell().lock() {
+        *cell = Some(status_line(text, is_error, &at));
+    }
+    refresh(app);
+}
+
+#[cfg(target_os = "linux")]
+pub use linux::refresh;
+#[cfg(not(target_os = "linux"))]
+pub use native::refresh;
+
 #[cfg(target_os = "linux")]
 pub use linux::build;
 #[cfg(not(target_os = "linux"))]
@@ -76,7 +118,14 @@ mod linux {
         }
 
         fn menu(&self) -> Vec<MenuItem<Self>> {
-            vec![
+            let mut items: Vec<MenuItem<Self>> = Vec::new();
+            if let Some(line) = super::status() {
+                items.push(
+                    StandardItem { label: line, enabled: false, ..Default::default() }.into(),
+                );
+                items.push(MenuItem::Separator);
+            }
+            items.extend([
                 StandardItem {
                     label: super::CAPTURE.into(),
                     activate: Box::new(|this: &mut Self| super::present(&this.app)),
@@ -90,9 +139,19 @@ mod linux {
                     ..Default::default()
                 }
                 .into(),
-            ]
+            ]);
+            items
         }
     }
+
+    /// Not wired up yet.
+    ///
+    /// `menu()` above reads the status, so it is correct whenever the host asks
+    /// for the layout — but DBusMenu hosts do not re-ask on their own, and
+    /// telling one to would mean keeping the ksni handle that `build` currently
+    /// drops. Until then the status appears on Linux from the next start rather
+    /// than the moment it changes. Untested there either way.
+    pub fn refresh<R: Runtime>(_app: &AppHandle<R>) {}
 
     /// The icon as the spec wants it: ARGB32, network byte order.
     ///
@@ -127,10 +186,46 @@ mod native {
     use tauri::tray::TrayIconBuilder;
     use tauri::{AppHandle, Runtime};
 
-    pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    /// The menu as it currently stands, status included if there is one.
+    ///
+    /// Rebuilt rather than mutated in place: it is three items, built at most
+    /// once per sync, and keeping a handle to one item alive for the life of
+    /// the process to avoid that would cost more than it saves.
+    fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         let capture = MenuItem::with_id(app, "capture", super::CAPTURE, true, None::<&str>)?;
         let quit = MenuItem::with_id(app, "quit", super::QUIT, true, None::<&str>)?;
-        let menu = Menu::with_items(app, &[&capture, &PredefinedMenuItem::separator(app)?, &quit])?;
+
+        let Some(line) = super::status() else {
+            return Menu::with_items(app, &[&capture, &PredefinedMenuItem::separator(app)?, &quit]);
+        };
+        // Disabled: it is something to read, not something to press.
+        let status = MenuItem::with_id(app, "status", line, false, None::<&str>)?;
+        Menu::with_items(
+            app,
+            &[
+                &status,
+                &PredefinedMenuItem::separator(app)?,
+                &capture,
+                &PredefinedMenuItem::separator(app)?,
+                &quit,
+            ],
+        )
+    }
+
+    /// Put the current status in front of the user without a window.
+    pub fn refresh<R: Runtime>(app: &AppHandle<R>) {
+        let Some(tray) = app.tray_by_id("photomem") else { return };
+        if let Ok(menu) = menu(app) {
+            let _ = tray.set_menu(Some(menu));
+        }
+        // Also the tooltip, which is the one place it can be read without
+        // opening anything.
+        let tip = super::status().unwrap_or_else(|| "photomem — new note".to_string());
+        let _ = tray.set_tooltip(Some(&tip));
+    }
+
+    pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+        let menu = menu(app)?;
 
         TrayIconBuilder::with_id("photomem")
             .icon(tauri::image::Image::from_bytes(super::ICON)?)
@@ -166,5 +261,30 @@ mod native {
             "quit" => super::quit(app),
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{status, status_cell, status_line};
+
+    #[test]
+    fn a_failure_is_marked_and_a_success_is_not() {
+        assert_eq!(status_line("synced", false, "14:23"), "synced · 14:23");
+        assert_eq!(
+            status_line("sync failed: no route to host", true, "14:23"),
+            "⚠ sync failed: no route to host · 14:23"
+        );
+    }
+
+    #[test]
+    fn there_is_nothing_to_show_until_something_has_synced() {
+        // A vault that is not a git repo never syncs, and a standing "not
+        // synced" would be a warning about a deliberate choice.
+        assert_eq!(status(), None);
+
+        *status_cell().lock().unwrap() = Some("synced · 09:15".into());
+        assert_eq!(status().as_deref(), Some("synced · 09:15"));
+        *status_cell().lock().unwrap() = None;
     }
 }

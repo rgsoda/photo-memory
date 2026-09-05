@@ -426,7 +426,8 @@ upgrade would ever acquire a link. `supersedes` is read from a body line *and* t
 frontmatter key §2 documents, since the picker writes the first and a hand-edited note may
 carry the second.
 
-**M5 — Sync.** git pull/commit/push, tray status, conflict handling. Done, less the tray.
+**M5 — Sync.** git pull/commit/push, tray status, conflict handling. Done on macOS; the
+tray line still needs wiring to ksni's update on Linux.
 *Usable: it works on two machines.*
 Driving the `git` binary rather than linking libgit2, because the vault is a repo the user
 owns and sometimes fixes by hand: sync has to honour the same SSH keys, credential helpers

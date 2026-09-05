@@ -194,6 +194,13 @@ cannot reach when you have forgotten the binding, and cannot quit. The tray icon
 daemon's entire visible surface: **left click captures**, right click opens a menu with
 *New note* and *Quit photomem*.
 
+Once anything has synced, the menu also carries a line saying what it did and when —
+`synced · 14:23`, or `⚠ sync failed: … · 14:23` — and the same text becomes the icon's
+tooltip. It is deliberately quiet: a failed push is something to notice on your own time,
+not a dialog in front of a half-typed note. There is no line at all until a sync has
+happened, because a vault that is not a git repo never will, and a standing "not synced"
+would be nagging about a deliberate choice.
+
 This works the same on both, which took two implementations. Tauri's tray goes through
 libappindicator on Linux, and libappindicator exports a StatusNotifierItem `Activate`
 method with nothing registered behind it: a left click reaches the process and dies there
