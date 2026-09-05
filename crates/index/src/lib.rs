@@ -33,6 +33,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
     path UNINDEXED,
     title,
     body,
+    ocr,
     tokenize='unicode61 remove_diacritics 2'
 );
 
@@ -61,6 +62,15 @@ CREATE TABLE IF NOT EXISTS tags (
 );
 
 CREATE INDEX IF NOT EXISTS tags_tag ON tags (tag);
+
+-- Keyed by the image, not by the note. Attachments are content-hashed and the
+-- same screenshot can be embedded in several notes; keying this by note would
+-- recognise one image repeatedly and store the result once per mention.
+CREATE TABLE IF NOT EXISTS ocr (
+    name      TEXT PRIMARY KEY,
+    text      TEXT NOT NULL,
+    languages TEXT NOT NULL
+);
 ";
 
 /// Bumped whenever the tables change shape.
@@ -70,7 +80,7 @@ CREATE INDEX IF NOT EXISTS tags_tag ON tags (tag);
 /// recorded mtime and size, `sync` skips them as unchanged, and they would
 /// never acquire the links a newly added table wants — leaving backlinks
 /// silently empty for every note captured before the upgrade.
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// An ordinary `[[name]]` mention.
 const KIND_LINK: &str = "link";
@@ -271,6 +281,10 @@ impl Index {
         for (i, name) in note.embeds().iter().enumerate() {
             stmt.execute(params![path, name, i as i64])?;
         }
+        // The row above has no OCR column yet; this fills it from whatever has
+        // already been recognised. Anything recognised later comes back through
+        // `set_ocr`, which calls the same refresh.
+        self.refresh_ocr(path)?;
 
         let mut stmt =
             self.db.prepare("INSERT OR IGNORE INTO tags (from_path, tag) VALUES (?1, ?2)")?;
@@ -329,6 +343,63 @@ impl Index {
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Record what an image turned out to say.
+    ///
+    /// Keyed by the image rather than the note, so a screenshot embedded in
+    /// several notes is read once and every one of them becomes searchable by
+    /// its contents.
+    pub fn set_ocr(&self, name: &str, text: &str, languages: &str) -> Result<()> {
+        self.db.execute(
+            "INSERT OR REPLACE INTO ocr (name, text, languages) VALUES (?1, ?2, ?3)",
+            params![name, text, languages],
+        )?;
+        let paths: Vec<String> = self
+            .db
+            .prepare("SELECT from_path FROM attachments WHERE name = ?1")?
+            .query_map([name], |r| r.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        for path in paths {
+            self.refresh_ocr(&path)?;
+        }
+        Ok(())
+    }
+
+    /// Images with no text yet, or whose text was read under other languages.
+    ///
+    /// The second half is what makes the setting changeable after the fact: the
+    /// images are kept forever, so a new language list just means these rows
+    /// are stale rather than that the old captures are lost.
+    pub fn needs_ocr(&self, languages: &str) -> Result<Vec<String>> {
+        let mut stmt = self.db.prepare(
+            "SELECT DISTINCT a.name FROM attachments a
+             LEFT JOIN ocr o ON o.name = a.name
+             WHERE o.name IS NULL OR o.languages <> ?1
+             ORDER BY a.name",
+        )?;
+        let rows = stmt.query_map([languages], |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Fold the text of a note's images into its search row.
+    ///
+    /// `put` rewrites that row wholesale, so this has to run after every
+    /// re-index as well as when a recognition lands, or editing one word of a
+    /// note would quietly drop everything read from its screenshots.
+    fn refresh_ocr(&self, path: &str) -> Result<()> {
+        let mut stmt = self.db.prepare(
+            "SELECT o.text FROM attachments a JOIN ocr o ON o.name = a.name
+             WHERE a.from_path = ?1 ORDER BY a.position",
+        )?;
+        let text: Vec<String> = stmt
+            .query_map([path], |r| r.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        self.db.execute(
+            "UPDATE notes_fts SET ocr = ?1 WHERE path = ?2",
+            params![text.join(" "), path],
+        )?;
+        Ok(())
     }
 
     /// Notes that reference `name`, newest first.
@@ -434,10 +505,10 @@ impl Index {
         let mut stmt = self.db.prepare(
             "SELECT f.path, n.title, n.created,
                     snippet(notes_fts, 2, '»', '«', '…', 12),
-                    bm25(notes_fts, 0.0, 4.0, 1.0)
+                    bm25(notes_fts, 0.0, 4.0, 1.0, 0.5)
              FROM notes_fts f JOIN notes n ON n.path = f.path
              WHERE notes_fts MATCH ?1
-             ORDER BY bm25(notes_fts, 0.0, 4.0, 1.0)
+             ORDER BY bm25(notes_fts, 0.0, 4.0, 1.0, 0.5)
              LIMIT ?2",
         )?;
 
@@ -908,6 +979,61 @@ mod tests {
         write(&dir, "note", "2026-01-05T10:00:00+01:00", "Note\nthe tag is gone from this body");
         assert_eq!(ix.sync(&dir).unwrap().updated, 1);
         assert!(ix.tags().unwrap().is_empty(), "a stale tag survived the edit");
+    }
+
+    #[test]
+    fn recognised_text_makes_a_screenshot_searchable() {
+        let (dir, mut ix) = vault_with("ocr-search", &[]);
+        write(&dir, "with-shot", "2026-01-01T10:00:00+01:00", "With shot\n![[abc.webp]]");
+        ix.sync(&dir).unwrap();
+        // The word exists only inside the picture, so nothing finds it yet.
+        assert!(ix.search("rebalance", 10).unwrap().is_empty());
+
+        ix.set_ocr("abc.webp", "Kafka rebalance storm", "eng").unwrap();
+        let hits = ix.search("rebalance", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "With shot");
+    }
+
+    #[test]
+    fn one_image_in_two_notes_is_read_once_and_found_from_both() {
+        let (dir, mut ix) = vault_with("ocr-shared", &[]);
+        write(&dir, "first", "2026-01-01T10:00:00+01:00", "First\n![[shared.webp]]");
+        write(&dir, "second", "2026-02-01T10:00:00+01:00", "Second\n![[shared.webp]]");
+        ix.sync(&dir).unwrap();
+
+        ix.set_ocr("shared.webp", "consumer eviction", "eng").unwrap();
+        assert_eq!(ix.search("eviction", 10).unwrap().len(), 2);
+        assert!(ix.needs_ocr("eng").unwrap().is_empty());
+    }
+
+    #[test]
+    fn pending_work_is_what_is_unread_or_read_under_other_languages() {
+        let (dir, mut ix) = vault_with("ocr-stale", &[]);
+        write(&dir, "shot", "2026-01-01T10:00:00+01:00", "Shot\n![[a.webp]]");
+        ix.sync(&dir).unwrap();
+        assert_eq!(ix.needs_ocr("eng").unwrap(), ["a.webp"]);
+
+        ix.set_ocr("a.webp", "some words", "eng").unwrap();
+        assert!(ix.needs_ocr("eng").unwrap().is_empty());
+        // Changing the configured languages makes the stored row stale, which is
+        // exactly what `reindex --ocr` looks for.
+        assert_eq!(ix.needs_ocr("eng+pol").unwrap(), ["a.webp"]);
+    }
+
+    #[test]
+    fn re_indexing_a_note_keeps_the_text_read_from_its_images() {
+        let (dir, mut ix) = vault_with("ocr-reindex", &[]);
+        write(&dir, "shot", "2026-01-01T10:00:00+01:00", "Shot\n![[a.webp]]");
+        ix.sync(&dir).unwrap();
+        ix.set_ocr("a.webp", "rebalance", "eng").unwrap();
+        assert_eq!(ix.search("rebalance", 10).unwrap().len(), 1);
+
+        // put() rewrites the search row wholesale, so an unrelated edit must not
+        // take the screenshot's text down with it.
+        write(&dir, "shot", "2026-01-01T10:00:00+01:00", "Shot\n![[a.webp]]\nan edit, longer");
+        assert_eq!(ix.sync(&dir).unwrap().updated, 1);
+        assert_eq!(ix.search("rebalance", 10).unwrap().len(), 1, "OCR text lost on re-index");
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! The whole API surface the UI has. Four calls.
 
+use anyhow::Context;
 use std::sync::Mutex;
 
 use photomem_config::Config;
@@ -32,6 +33,12 @@ pub fn save_note<R: Runtime>(app: tauri::AppHandle<R>, body: String) -> CmdResul
     // Only after the note is safely on disk. Sync is a convenience; the capture
     // is the thing that must not be lost, and it now cannot be.
     commit_in_background(&app, note.title().to_string());
+
+    // Indexed here rather than at the next window open, so the note is findable
+    // straight away — and so the OCR pass can see the screenshots it embeds,
+    // which only enter the index when the note embedding them does.
+    refresh_index(&app);
+    spawn_ocr_pass(&app);
     Ok(path.display().to_string())
 }
 
@@ -316,6 +323,54 @@ pub fn refresh_index<R: Runtime>(app: &tauri::AppHandle<R>) {
         Ok(_) => {}
         Err(e) => eprintln!("photomem: index sync failed: {e:#}"),
     }
+}
+
+/// Read any screenshots that have not been read yet, in the background.
+///
+/// Capture must never wait for this, so it runs off the caller's thread and
+/// takes the index lock only to ask what is outstanding and again to record
+/// each answer — never while a recogniser is running. A search typed during a
+/// pass is therefore not stuck behind it.
+pub fn spawn_ocr_pass<R: Runtime>(app: &tauri::AppHandle<R>) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = ocr_pass(&app) {
+            eprintln!("photomem: OCR pass stopped: {e:#}");
+        }
+    });
+}
+
+fn ocr_pass<R: Runtime>(app: &tauri::AppHandle<R>) -> anyhow::Result<()> {
+    let cfg = Config::load()?;
+    // Normalised here too, so that "what is stale" is asked in exactly the
+    // terms the recogniser records its answers in.
+    let languages = photomem_images::ocr::languages_or_default(&cfg.ocr.languages);
+    let asked = languages.join("+");
+    let vault = Vault::new(cfg.vault);
+
+    let pending = {
+        let state = app.state::<Search>();
+        let index = state.0.lock().map_err(|_| anyhow::anyhow!("index is poisoned"))?;
+        index.needs_ocr(&asked)?
+    };
+
+    for name in pending {
+        // A note can name an image that is not on disk. That is a gap for the
+        // viewer to show, not a reason to stop reading the rest.
+        let Some(bytes) = vault.read_attachment(&name) else { continue };
+
+        // A failure here means the recogniser itself is unavailable — a Linux
+        // box with no tesseract — so stop rather than repeat one error for
+        // every image in the vault. The next pass retries, which is what should
+        // happen once it is installed.
+        let found = photomem_images::ocr::recognize(&bytes, &languages)
+            .with_context(|| format!("reading {name}"))?;
+
+        let state = app.state::<Search>();
+        let index = state.0.lock().map_err(|_| anyhow::anyhow!("index is poisoned"))?;
+        index.set_ocr(&name, &found.text, &found.languages)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

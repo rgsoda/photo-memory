@@ -442,7 +442,16 @@ What is left is a genuine edit of the same file on two machines, which the UI ca
 produce — and there the right answer is to stop and let the user resolve it in git, not to
 guess.
 
-**M6 — OCR.** tesseract on paste, OCR text into the index. *The differentiator.*
+**M6 — OCR.** Text read out of every screenshot and into the index. Done.
+*The differentiator.*
+Vision on macOS, the `tesseract` binary on Linux, behind one `recognize`. Shelling out
+rather than linking leptonica means a machine without it loses OCR instead of failing to
+build — too high a price for a background, index-only feature. The text is keyed by image
+rather than by note, because attachments are content-hashed and one screenshot can be
+embedded in many notes; keying it by note would read the same picture repeatedly. Reading
+runs on a background thread after a save and on every window open, holding the index lock
+only to ask what is outstanding and to record each answer, never while a recogniser is
+running.
 
 **M7 — Browsing.** Timeline grouping and the thumbnail wall, both filterable by tag. Done.
 `Tab` cycles search → wall → timeline → search, one key for all of it. The three group

@@ -32,18 +32,27 @@ pub struct Recognized {
 /// but adds noise and latency, so it stays a one-line config change.
 pub const DEFAULT_LANGUAGES: [&str; 1] = ["eng"];
 
+/// The languages actually used, given what the config asked for.
+///
+/// Callers deciding which stored rows are stale have to agree with the
+/// recogniser about this. An empty list would otherwise be recorded as "eng"
+/// but asked about as "", never match, and mark every image as needing work
+/// again on every pass, for ever.
+pub fn languages_or_default(languages: &[String]) -> Vec<String> {
+    if languages.is_empty() {
+        DEFAULT_LANGUAGES.iter().map(|s| s.to_string()).collect()
+    } else {
+        languages.to_vec()
+    }
+}
+
 /// Recognize the text in a stored image.
 ///
 /// Best-effort by nature: an image with no text is not an error, and neither is
 /// a machine with no recogniser installed. Callers treat a failure as "no text
 /// yet" rather than as something to report.
 pub fn recognize(image: &[u8], languages: &[String]) -> Result<Recognized> {
-    let langs: Vec<String> = if languages.is_empty() {
-        DEFAULT_LANGUAGES.iter().map(|s| s.to_string()).collect()
-    } else {
-        languages.to_vec()
-    };
-
+    let langs = languages_or_default(languages);
     let png = to_png(image)?;
     let text = run(&png, &langs)?;
     Ok(Recognized { text: normalize(&text), languages: langs.join("+") })
@@ -198,6 +207,13 @@ mod tests {
     #[test]
     fn an_image_with_no_text_is_empty_rather_than_an_error() {
         assert_eq!(recognize(&blank(), &["eng".into()]).unwrap().text, "");
+    }
+
+    #[test]
+    fn the_fallback_is_the_same_on_both_sides() {
+        // If these ever disagree, every image is marked stale on every pass.
+        assert_eq!(languages_or_default(&[]), ["eng"]);
+        assert_eq!(recognize(&blank(), &[]).unwrap().languages, languages_or_default(&[]).join("+"));
     }
 
     #[test]

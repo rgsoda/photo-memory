@@ -19,6 +19,7 @@ pub struct Config {
     pub hotkey: String,
     pub sync: SyncConfig,
     pub image: ImageConfig,
+    pub ocr: OcrConfig,
 }
 
 /// Control+Option+N, not the `Super+N` the design suggests for Linux.
@@ -35,6 +36,7 @@ impl Default for Config {
             hotkey: DEFAULT_HOTKEY.to_string(),
             sync: SyncConfig::default(),
             image: ImageConfig::default(),
+            ocr: OcrConfig::default(),
         }
     }
 }
@@ -53,6 +55,25 @@ pub struct SyncConfig {
 impl Default for SyncConfig {
     fn default() -> Self {
         SyncConfig { enabled: true }
+    }
+}
+
+/// Which languages the recogniser is told to expect.
+///
+/// Spelled as tesseract spells them, because that is what DESIGN.md §3 settled
+/// on and what a Linux install documents; the macOS backend maps them across.
+/// Polish is wanted eventually but adds noise and latency, so it stays a
+/// one-line change rather than a default.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct OcrConfig {
+    pub languages: Vec<String>,
+}
+
+impl Default for OcrConfig {
+    fn default() -> Self {
+        let d = photomem_images::ocr::DEFAULT_LANGUAGES;
+        OcrConfig { languages: d.iter().map(|s| s.to_string()).collect() }
     }
 }
 
@@ -112,6 +133,13 @@ enabled = {sync_enabled}
 max_edge = {max_edge}
 thumb_edge = {thumb_edge}
 quality = {quality}
+
+[ocr]
+# Text inside pasted screenshots is read in the background and put into the
+# search index only -- never into the note. Named as tesseract names them.
+# Adding a language makes every image read under the old list stale, and they
+# are re-read in the background, since the pictures are kept forever.
+languages = {languages}
 ";
 
 impl Config {
@@ -146,10 +174,18 @@ impl Config {
             .replace("{sync_enabled}", &self.sync.enabled.to_string())
             .replace("{max_edge}", &self.image.max_edge.to_string())
             .replace("{thumb_edge}", &self.image.thumb_edge.to_string())
-            .replace("{quality}", &self.image.quality.to_string());
+            .replace("{quality}", &self.image.quality.to_string())
+            .replace("{languages}", &toml_list(&self.ocr.languages));
         std::fs::write(path, body)?;
         Ok(())
     }
+}
+
+/// `["eng", "pol"]` — small enough to write by hand and keeps toml out of the
+/// template rendering, which is plain string replacement everywhere else.
+fn toml_list(items: &[String]) -> String {
+    let quoted: Vec<String> = items.iter().map(|i| format!("\"{i}\"")).collect();
+    format!("[{}]", quoted.join(", "))
 }
 
 pub fn config_path() -> PathBuf {
@@ -240,6 +276,18 @@ mod tests {
 
         std::fs::write(&path, "[sync]\nenabled = false\n").unwrap();
         assert!(!Config::load_from(&path).unwrap().sync.enabled);
+    }
+
+    #[test]
+    fn ocr_languages_default_and_round_trip_through_the_template() {
+        let path = tmpdir("ocr").join("config.toml");
+        let cfg = Config::load_from(&path).unwrap();
+        assert_eq!(cfg.ocr.languages, ["eng"]);
+        // The template it just wrote must parse back to the same thing.
+        assert_eq!(Config::load_from(&path).unwrap(), cfg);
+
+        std::fs::write(&path, "[ocr]\nlanguages = [\"eng\", \"pol\"]\n").unwrap();
+        assert_eq!(Config::load_from(&path).unwrap().ocr.languages, ["eng", "pol"]);
     }
 
     #[test]

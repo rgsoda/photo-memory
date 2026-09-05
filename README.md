@@ -4,7 +4,8 @@ Fast visual note capture. Hotkey, type, save, gone.
 
 See [DESIGN.md](DESIGN.md) for the format and the plan. Working today: capture, clipboard
 images, full-text search, the read-only viewer, citations between notes, git sync, and the
-thumbnail wall, timeline and tags — on Linux and macOS both. Not yet: OCR and a packaged macOS build.
+thumbnail wall, timeline, tags and OCR — on Linux and macOS both. Not yet: a packaged
+macOS build.
 
 ## Install
 
@@ -62,7 +63,18 @@ enabled = true
 max_edge = 1600
 thumb_edge = 320
 quality = 75
+
+[ocr]
+# Text inside pasted screenshots is read in the background and put into the
+# search index only — never into the note. Named as tesseract names them.
+# Adding a language makes every image read under the old list stale, and they
+# are re-read in the background, since the pictures are kept forever.
+languages = ["eng"]
 ```
+
+macOS reads them with Vision, which is part of the OS. Linux shells out to `tesseract`,
+so install it (`pacman -S tesseract tesseract-data-eng`, or your distro's equivalent) —
+without it everything else still works and only OCR is missing.
 
 The vault is a **separate repo** from this one — this holds the app, that holds your notes.
 
@@ -254,6 +266,11 @@ step through the note's images, and `Esc` closes it. Notes are never
 edited in the app — corrections are new notes that supersede old ones, and a typo is fixed
 by opening the file in any editor.
 
+Search covers the text *inside* your screenshots as well as the notes themselves, so a
+capture of a stack trace is findable by a line in it. That text lives only in the index,
+never in the markdown. It is read in the background after a save and on every window open,
+so a just-pasted image becomes searchable a moment later rather than holding up the save.
+
 Accents can be skipped while typing: `gesla` finds `gęślą`. The one exception is `ł`, which
 has no Unicode decomposition and so does not fold — `zazołc` finds `zażółć`, `zazolc` does not.
 
@@ -324,4 +341,3 @@ need is whether it compiles.
   Linux-only (M8).
 - Tags are inline text, so `#ff0000` in a note about CSS becomes a tag. `#1234` and
   `# heading` do not.
-- No OCR (M6).

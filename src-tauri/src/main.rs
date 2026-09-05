@@ -184,6 +184,11 @@ pub(crate) fn present<R: tauri::Runtime>(window: &WebviewWindow<R>) {
     // behind an `invoke` that could quietly not happen.
     commands::refresh_index(window.app_handle());
 
+    // And read anything captured since — a screenshot pasted on another machine
+    // and pulled in by sync arrives as a file, with no paste for its OCR to
+    // hang off.
+    commands::spawn_ocr_pass(window.app_handle());
+
     // Notes captured on the other machine arrive here. Off the UI thread: the
     // window must appear now, not after a network round trip.
     commands::pull_in_background(window.app_handle());
