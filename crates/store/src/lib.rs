@@ -124,6 +124,28 @@ impl Vault {
         std::fs::read(self.thumbs_dir().join(safe_name(name)?)).ok()
     }
 
+    /// The thumbnail for an attachment, rebuilt from the image if it is absent.
+    ///
+    /// A vault cloned or pulled from another machine has every attachment and
+    /// no thumbnails at all: they are gitignored, being derived. Without this
+    /// a note written on one machine shows no pictures on the other — the
+    /// images are right there, it is only the cache that is missing.
+    pub fn thumbnail(&self, name: &str, opts: photomem_images::Options) -> Option<Vec<u8>> {
+        if let Some(cached) = self.read_thumbnail(name) {
+            return Some(cached);
+        }
+        let full = self.read_attachment(name)?;
+        let thumb = photomem_images::thumbnail_of(&full, opts).ok()?;
+
+        // Cached on the way out, so this costs one decode per image per machine
+        // rather than one per time the note is opened.
+        if let Some(safe) = safe_name(name) {
+            let _ = std::fs::create_dir_all(self.thumbs_dir());
+            let _ = write_atomic(&self.thumbs_dir().join(safe), &thumb, &self.state_dir());
+        }
+        Some(thumb)
+    }
+
     /// The stored image at full size, for the lightbox.
     pub fn read_attachment(&self, name: &str) -> Option<Vec<u8>> {
         std::fs::read(self.attachments_dir().join(safe_name(name)?)).ok()
@@ -278,6 +300,31 @@ mod tests {
         assert_eq!(v.read_attachment(&name).unwrap(), a.webp);
         // The lightbox must get the image, not the thumbnail.
         assert_ne!(v.read_attachment(&name), v.read_thumbnail(&name));
+    }
+
+    #[test]
+    fn a_thumbnail_is_rebuilt_when_only_the_image_survived() {
+        let v = vault("rethumb");
+        let a = attachment(5);
+        let name = v.save_attachment(&a, "2026-09-05").unwrap();
+
+        // Exactly what a clone leaves behind: the attachment is committed, the
+        // thumbnail is gitignored and is not.
+        std::fs::remove_file(v.thumbs_dir().join(&name)).unwrap();
+        assert!(v.read_thumbnail(&name).is_none());
+
+        let rebuilt = v.thumbnail(&name, Default::default()).expect("rebuilt from the image");
+        assert!(!rebuilt.is_empty());
+        // And kept, so opening the note twice does not decode it twice.
+        assert!(v.read_thumbnail(&name).is_some());
+    }
+
+    #[test]
+    fn a_thumbnail_for_an_image_that_is_not_there_is_still_nothing() {
+        let v = vault("rethumb-missing");
+        v.ensure().unwrap();
+        assert!(v.thumbnail("nope.webp", Default::default()).is_none());
+        assert!(v.thumbnail("../../etc/passwd", Default::default()).is_none());
     }
 
     #[test]

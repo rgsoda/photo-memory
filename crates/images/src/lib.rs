@@ -80,6 +80,16 @@ pub fn dimensions(webp: &[u8]) -> Option<(u32, u32)> {
     Some((decoded.width(), decoded.height()))
 }
 
+/// A thumbnail for an image that is already stored.
+///
+/// Thumbnails are derived state and gitignored, so an attachment that arrived
+/// over sync has its full-size file and no thumbnail. This makes one from what
+/// is on disk, without going back to the original that no longer exists.
+pub fn thumbnail_of(stored: &[u8], opts: Options) -> Result<Vec<u8>> {
+    let img = image::load_from_memory(stored).context("decoding a stored image")?;
+    Ok(encode(&fit(&img, opts.thumb_edge), opts.quality))
+}
+
 /// Process an already-encoded image, as delivered by a webview paste event.
 pub fn from_encoded(bytes: &[u8], opts: Options) -> Result<Attachment> {
     let img = image::load_from_memory(bytes).context("decoding pasted image")?;

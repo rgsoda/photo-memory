@@ -16,6 +16,11 @@ pub struct Search(pub Mutex<Index>);
 /// Errors reach the UI as strings; there is nothing it can do but show them.
 type CmdResult<T> = Result<T, String>;
 
+/// How thumbnails should be made when one has to be rebuilt.
+fn image_opts() -> photomem_images::Options {
+    Config::load().map(|cfg| cfg.image.into()).unwrap_or_default()
+}
+
 fn vault() -> CmdResult<Vault> {
     let cfg = Config::load().map_err(|e| format!("{e:#}"))?;
     Ok(Vault::new(cfg.vault))
@@ -137,11 +142,13 @@ pub fn dismiss<R: Runtime>(window: Window<R>, text: String) -> CmdResult<()> {
 pub struct Pasted {
     /// Filename to write into the note as `![[name]]`.
     name: String,
-    /// The thumbnail, inlined as a data URL.
+    /// The thumbnail, inlined as a data URL. `None` when the image itself is
+    /// gone — the viewer draws a marked gap for it, because an embed that
+    /// silently vanishes looks like a note that never had a picture.
     ///
     /// These are a few kilobytes each, so inlining them costs less than opening
     /// Tauri's asset protocol to the whole vault would.
-    thumb: String,
+    thumb: Option<String>,
 }
 
 fn data_url(bytes: &[u8]) -> String {
@@ -175,7 +182,7 @@ pub fn paste_image() -> CmdResult<Pasted> {
     let date = chrono::Local::now().format("%Y-%m-%d").to_string();
     let name = vault.save_attachment(&attachment, &date).map_err(|e| format!("{e:#}"))?;
 
-    Ok(Pasted { thumb: data_url(&attachment.thumb), name })
+    Ok(Pasted { thumb: Some(data_url(&attachment.thumb)), name })
 }
 
 /// Thumbnails for images already referenced in the buffer, so a restored draft
@@ -183,11 +190,12 @@ pub fn paste_image() -> CmdResult<Pasted> {
 #[tauri::command]
 pub fn thumbnails(names: Vec<String>) -> CmdResult<Vec<Pasted>> {
     let vault = vault()?;
+    let opts = image_opts();
     Ok(names
         .into_iter()
-        .filter_map(|name| {
-            let bytes = vault.read_thumbnail(&name)?;
-            Some(Pasted { name, thumb: data_url(&bytes) })
+        .map(|name| {
+            let thumb = vault.thumbnail(&name, opts).map(|b| data_url(&b));
+            Pasted { name, thumb }
         })
         .collect())
 }
@@ -277,13 +285,14 @@ pub fn wall(search: State<'_, Search>, tag: Option<String>) -> CmdResult<Vec<Wal
     const LIMIT: usize = 500;
 
     let vault = vault()?;
+    let opts = image_opts();
     let index = search.0.lock().map_err(|_| "index is poisoned".to_string())?;
     Ok(index
         .wall(tag.as_deref(), LIMIT)
         .map_err(|e| format!("{e:#}"))?
         .into_iter()
         .filter_map(|shot| {
-            let bytes = vault.read_thumbnail(&shot.name)?;
+            let bytes = vault.thumbnail(&shot.name, opts)?;
             Some(WallItem {
                 name: shot.name,
                 thumb: data_url(&bytes),
@@ -477,11 +486,15 @@ fn read_note(vault: &Vault, index: &Index, path: &std::path::Path) -> CmdResult<
     let note = Note::parse(&text, chrono::Local::now()).map_err(|e| e.to_string())?;
     let name = link_name(path);
 
+    // Rebuilt on demand, not filtered out: a note pulled from another machine
+    // has its images and none of the thumbnails, and dropping them here is what
+    // made a synced note look like it never had a picture.
+    let opts = image_opts();
     let images = embedded_names(note.content())
         .into_iter()
-        .filter_map(|name| {
-            let bytes = vault.read_thumbnail(&name)?;
-            Some(Pasted { name, thumb: data_url(&bytes) })
+        .map(|name| {
+            let thumb = vault.thumbnail(&name, opts).map(|b| data_url(&b));
+            Pasted { name, thumb }
         })
         .collect();
 
