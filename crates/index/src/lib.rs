@@ -9,10 +9,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, TimeZone};
 use photomem_core::Note;
-use rusqlite::{params, Connection};
+use rusqlite::types::Value;
+use rusqlite::{params, params_from_iter, Connection};
 
 mod query;
-pub use query::to_fts_query;
+pub use query::{parse as parse_query, to_fts_query, Query};
 
 /// `remove_diacritics 2` folds Polish accents, so "zazolc" finds "zażółć" —
 /// which matters for typing a search fast in the middle of something else.
@@ -482,38 +483,50 @@ impl Index {
     /// Opening the picker with nothing typed should show something useful, so an
     /// empty query is "what did I capture lately" rather than no results.
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<Hit>> {
-        match to_fts_query(query) {
-            Some(fts) => self.matching(&fts, limit),
-            None => self.recent(limit),
+        let q = query::parse(query);
+        match &q.text {
+            Some(fts) => self.matching(fts, &q.tags, limit),
+            None => self.recent(&q.tags, limit),
         }
     }
 
-    fn recent(&self, limit: usize) -> Result<Vec<Hit>> {
-        let mut stmt = self.db.prepare(
+    fn recent(&self, tags: &[String], limit: usize) -> Result<Vec<Hit>> {
+        let sql = format!(
             "SELECT n.path, n.title, n.created, substr(f.body, 1, 160)
              FROM notes n JOIN notes_fts f ON f.path = n.path
-             ORDER BY n.created DESC LIMIT ?1",
-        )?;
-        let rows = stmt.query_map([limit as i64], row_to_hit)?;
+             WHERE 1 = 1{}
+             ORDER BY n.created DESC LIMIT ?",
+            tag_clauses(tags)
+        );
+        let mut args = tag_args(tags);
+        args.push(Value::Integer(limit as i64));
+
+        let mut stmt = self.db.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(args), row_to_hit)?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
     /// bm25 takes one weight per column, *including* the unindexed `path`, so
     /// the weights below read path, title, body. A note titled after a thing is
     /// worth more than one that mentions it in passing.
-    fn matching(&self, fts: &str, limit: usize) -> Result<Vec<Hit>> {
-        let mut stmt = self.db.prepare(
+    fn matching(&self, fts: &str, tags: &[String], limit: usize) -> Result<Vec<Hit>> {
+        let sql = format!(
             "SELECT f.path, n.title, n.created,
                     snippet(notes_fts, 2, '»', '«', '…', 12),
                     bm25(notes_fts, 0.0, 4.0, 1.0, 0.5)
              FROM notes_fts f JOIN notes n ON n.path = f.path
-             WHERE notes_fts MATCH ?1
+             WHERE notes_fts MATCH ?{}
              ORDER BY bm25(notes_fts, 0.0, 4.0, 1.0, 0.5)
-             LIMIT ?2",
-        )?;
-
+             LIMIT ?",
+            tag_clauses(tags)
+        );
+        let mut args = vec![Value::Text(fts.to_string())];
+        args.append(&mut tag_args(tags));
         // Over-fetch so the recency boost has something to reorder.
-        let rows = stmt.query_map(params![fts, (limit * 4) as i64], |r| {
+        args.push(Value::Integer((limit * 4) as i64));
+
+        let mut stmt = self.db.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(args), |r| {
             Ok((row_to_hit(r)?, r.get::<_, f64>(4)?))
         })?;
 
@@ -534,6 +547,24 @@ impl Index {
 
         Ok(scored.into_iter().map(|(hit, _)| hit).collect())
     }
+}
+
+/// One `EXISTS` per tag, so several tags narrow the search rather than widen it.
+///
+/// A tag matches its children too: `#work` finds a note tagged `#work/kafka`.
+/// That is what makes the hierarchy a second grouping axis rather than a naming
+/// convention (DESIGN.md §2), and it costs one `LIKE` against an indexed column.
+fn tag_clauses(tags: &[String]) -> String {
+    tags.iter()
+        .map(|_| {
+            " AND EXISTS (SELECT 1 FROM tags t WHERE t.from_path = n.path              AND (t.tag = ? OR t.tag LIKE ? || '/%'))"
+        })
+        .collect()
+}
+
+/// Each tag twice over, matching the two placeholders `tag_clauses` writes.
+fn tag_args(tags: &[String]) -> Vec<Value> {
+    tags.iter().flat_map(|t| [Value::Text(t.clone()), Value::Text(t.clone())]).collect()
 }
 
 /// The `[[link]]` target for a note: its filename without the `.md`.
@@ -979,6 +1010,60 @@ mod tests {
         write(&dir, "note", "2026-01-05T10:00:00+01:00", "Note\nthe tag is gone from this body");
         assert_eq!(ix.sync(&dir).unwrap().updated, 1);
         assert!(ix.tags().unwrap().is_empty(), "a stale tag survived the edit");
+    }
+
+    #[test]
+    fn a_tag_narrows_the_search_to_notes_carrying_it() {
+        let (dir, mut ix) = vault_with("tag-filter", &[]);
+        write(&dir, "tagged", "2026-01-01T10:00:00+01:00", "Kafka notes\n#work rebalance trouble");
+        write(&dir, "plain", "2026-02-01T10:00:00+01:00", "Kafka elsewhere\nrebalance trouble too");
+        ix.sync(&dir).unwrap();
+
+        assert_eq!(ix.search("rebalance", 10).unwrap().len(), 2);
+        let hits = ix.search("#work rebalance", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "Kafka notes");
+    }
+
+    #[test]
+    fn a_tag_on_its_own_lists_what_carries_it_newest_first() {
+        let (dir, mut ix) = vault_with("tag-only", &[]);
+        write(&dir, "older", "2026-01-01T10:00:00+01:00", "Older\n#work one");
+        write(&dir, "newer", "2026-02-01T10:00:00+01:00", "Newer\n#work two");
+        write(&dir, "other", "2026-03-01T10:00:00+01:00", "Other\n#home three");
+        ix.sync(&dir).unwrap();
+
+        let hits = ix.search("#work", 10).unwrap();
+        let titles: Vec<&str> = hits.iter().map(|h| h.title.as_str()).collect();
+        assert_eq!(titles, ["Newer", "Older"]);
+    }
+
+    #[test]
+    fn a_parent_tag_finds_its_children_but_not_a_longer_word() {
+        let (dir, mut ix) = vault_with("tag-nested", &[]);
+        write(&dir, "kafka", "2026-01-01T10:00:00+01:00", "Kafka\n#work/kafka one");
+        write(&dir, "chores", "2026-02-01T10:00:00+01:00", "Chores\n#homework two");
+        ix.sync(&dir).unwrap();
+
+        // The hierarchy is the point: #work is everything beneath it.
+        assert_eq!(ix.search("#work", 10).unwrap().len(), 1);
+        // But it matches a path segment, not any old prefix, or #home would
+        // quietly collect #homework and the filter list would stop meaning
+        // anything.
+        assert!(ix.search("#home", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn two_tags_narrow_rather_than_widen() {
+        let (dir, mut ix) = vault_with("tag-and", &[]);
+        write(&dir, "both", "2026-01-01T10:00:00+01:00", "Both\n#work #urgent one");
+        write(&dir, "single", "2026-02-01T10:00:00+01:00", "Single\n#work two");
+        ix.sync(&dir).unwrap();
+
+        assert_eq!(ix.search("#work", 10).unwrap().len(), 2);
+        let hits = ix.search("#work #urgent", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "Both");
     }
 
     #[test]

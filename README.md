@@ -274,6 +274,11 @@ step through the note's images, and `Esc` closes it. Notes are never
 edited in the app — corrections are new notes that supersede old ones, and a typo is fixed
 by opening the file in any editor.
 
+Typing `#work` in the search box narrows to notes carrying that tag, and it includes
+everything beneath it — `#work` finds a note tagged `#work/kafka`. Several tags narrow
+rather than widen. A `#404` is treated as text, since that is a number people write in
+prose rather than a filter.
+
 Search covers the text *inside* your screenshots as well as the notes themselves, so a
 capture of a stack trace is findable by a line in it. That text lives only in the index,
 never in the markdown. It is read in the background after a save and on every window open,
@@ -343,7 +348,7 @@ need is whether it compiles.
 ## Not there yet
 
 - Images show in a strip under the editor, not inline in the text.
-- Search has no tag or date filters yet.
+- Search filters by `#tag` but not yet by date.
 - No `.app` bundle or signed macOS release: `install.sh` puts a binary on your PATH and
   prints a LaunchAgent to write, rather than producing something for Applications (M8).
 - Tags are inline text, so `#ff0000` in a note about CSS becomes a tag. `#1234` and

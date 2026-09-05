@@ -53,3 +53,70 @@ mod tests {
         assert_eq!(to_fts_query("zażółć").unwrap(), "\"zażółć\"*");
     }
 }
+
+/// A search as typed: `#tag`s narrow it, everything else is text to match.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Query {
+    /// Lower-cased and without the `#`, which is how the index stores them.
+    pub tags: Vec<String>,
+    /// `None` when only tags were typed, which callers read as "everything
+    /// carrying these" rather than "no results".
+    pub text: Option<String>,
+}
+
+/// Split what was typed into tag filters and search text.
+pub fn parse(input: &str) -> Query {
+    let mut tags: Vec<String> = Vec::new();
+    let mut words: Vec<&str> = Vec::new();
+
+    for token in input.split_whitespace() {
+        match token.strip_prefix('#') {
+            // The same rule that put them in the index: a tag starts with a
+            // letter. `#404` typed into a search is a number being looked for,
+            // not a filter that would match nothing.
+            Some(name) if name.starts_with(|c: char| c.is_alphabetic()) => {
+                let name = name.trim_end_matches(['-', '_', '/']).to_lowercase();
+                if !tags.contains(&name) {
+                    tags.push(name);
+                }
+            }
+            _ => words.push(token),
+        }
+    }
+
+    Query { tags, text: to_fts_query(&words.join(" ")) }
+}
+
+#[cfg(test)]
+mod query_tests {
+    use super::*;
+
+    #[test]
+    fn separates_tags_from_text() {
+        let q = parse("#work kafka rebalance");
+        assert_eq!(q.tags, ["work"]);
+        assert_eq!(q.text.unwrap(), "\"kafka\"* \"rebalance\"*");
+    }
+
+    #[test]
+    fn tags_alone_leave_nothing_to_match() {
+        let q = parse("#work #debugging");
+        assert_eq!(q.tags, ["work", "debugging"]);
+        assert_eq!(q.text, None);
+    }
+
+    #[test]
+    fn a_number_is_not_a_tag() {
+        // `#404` is something written in prose, and filtering on it would
+        // silently return nothing rather than searching for it.
+        let q = parse("#404");
+        assert!(q.tags.is_empty());
+        assert_eq!(q.text.unwrap(), "\"404\"*");
+    }
+
+    #[test]
+    fn trailing_punctuation_and_case_match_how_tags_are_stored() {
+        assert_eq!(parse("#Kafka/").tags, ["kafka"]);
+        assert_eq!(parse("#work #WORK").tags, ["work"]);
+    }
+}
