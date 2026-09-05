@@ -9,6 +9,24 @@ macOS build.
 
 ## Install
 
+### Homebrew, on macOS
+
+```bash
+brew tap rgsoda/photomem https://github.com/rgsoda/photo-memory
+brew install --HEAD rgsoda/photomem/photomem
+brew services start photomem
+```
+
+`brew services` writes and loads the LaunchAgent, so the daemon starts at login and there
+is no plist to write by hand.
+
+`--HEAD` is needed because there is no tagged release yet: the formula builds from `main`.
+That is deliberate rather than an oversight — a formula pinning a stable version at a
+moving branch would leave `brew upgrade` convinced it was already current. `brew upgrade
+--fetch-HEAD photomem` picks up new commits.
+
+### From source, on Linux or macOS
+
 ```bash
 git clone git@github.com:rgsoda/photo-memory.git
 cd photo-memory
