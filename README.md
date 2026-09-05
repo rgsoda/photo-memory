@@ -17,7 +17,8 @@ cd photo-memory
 
 That checks the build dependencies, builds, and puts the binary in `~/.local/bin`. It never
 touches your compositor config or your shell profile — it prints what to add and leaves
-those files to you. It is Linux-only; on macOS, build by hand as below.
+those files to you. It works on macOS too, where the only system dependency is the
+Xcode Command Line Tools.
 
 | | |
 |---|---|
@@ -176,8 +177,15 @@ permission, so there is no prompt on first run and nothing to grant in System Se
 the key cannot be bound the app says so on stderr and starts anyway — `photomem capture`
 still opens the window.
 
-Not packaged yet: no `.app`, no menu bar agent, no LaunchAgent, so the daemon keeps a dock
-icon and is started by hand. That is the rest of M8.
+The daemon runs as a menu bar agent, so it has no dock icon and does not appear in
+Cmd-Tab — it is something you summon, not something you switch to.
+
+To start it at login, `./install.sh` prints a `~/Library/LaunchAgents` plist to write and
+the `launchctl load` line for it. As with the compositor config on Linux, it prints and
+leaves the file to you.
+
+Still not packaged: there is no `.app` bundle or signed release, so it is a binary on your
+PATH rather than something in Applications. That is what remains of M8.
 
 ## The status bar icon
 
@@ -336,8 +344,7 @@ need is whether it compiles.
 
 - Images show in a strip under the editor, not inline in the text.
 - Search has no tag or date filters yet.
-- On macOS the app runs with a menu bar icon but is not packaged: no `.app` bundle, no
-  `LSUIElement` so the daemon also keeps a dock icon, no LaunchAgent, and `install.sh` is
-  Linux-only (M8).
+- No `.app` bundle or signed macOS release: `install.sh` puts a binary on your PATH and
+  prints a LaunchAgent to write, rather than producing something for Applications (M8).
 - Tags are inline text, so `#ff0000` in a note about CSS becomes a tag. `#1234` and
   `# heading` do not.

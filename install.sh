@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build and install photomem on Linux.
+# Build and install photomem on Linux or macOS.
 #
 # Does three things and stops: checks the build dependencies, builds the release
 # binary, copies it onto your PATH. It never edits your compositor config or
@@ -13,6 +13,10 @@
 #   ./install.sh --check      only report what is missing, build nothing
 
 set -euo pipefail
+
+# macOS needs none of the Linux webview stack: Tauri renders through WKWebView,
+# which is part of the OS, and OCR goes through Vision rather than tesseract.
+os="$(uname -s)"
 
 PREFIX="${PREFIX:-$HOME/.local}"
 INSTALL_DEPS=0
@@ -46,7 +50,8 @@ cd "$(dirname "$0")"
 # Names differ per distro, so the lists are spelled out rather than guessed.
 
 detect_distro() {
-    if   command -v pacman  >/dev/null 2>&1; then echo arch
+    if   [ "$os" = "Darwin" ]; then echo macos
+    elif command -v pacman  >/dev/null 2>&1; then echo arch
     elif command -v apt-get >/dev/null 2>&1; then echo debian
     elif command -v dnf     >/dev/null 2>&1; then echo fedora
     elif command -v zypper  >/dev/null 2>&1; then echo suse
@@ -59,6 +64,7 @@ deps_command() {
         arch)   echo "sudo pacman -S --needed base-devel pkgconf webkit2gtk-4.1 gtk3 libsoup3 librsvg" ;;
         debian) echo "sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libssl-dev" ;;
         fedora) echo "sudo dnf install -y @development-tools pkgconf-pkg-config webkit2gtk4.1-devel gtk3-devel libsoup3-devel librsvg2-devel openssl-devel" ;;
+        macos)  echo "xcode-select --install" ;;
         suse)   echo "sudo zypper install -y -t pattern devel_basis && sudo zypper install -y webkit2gtk3-soup2-devel gtk3-devel libsoup-devel librsvg-devel" ;;
         *)      echo "" ;;
     esac
@@ -77,7 +83,14 @@ fi
 # pkg-config is the honest test: the package may be named anything, but if the
 # compiler cannot find webkit2gtk-4.1 the build will fail several minutes in.
 missing=0
-if ! command -v pkg-config >/dev/null 2>&1; then
+if [ "$os" = "Darwin" ]; then
+    # The only system piece is the toolchain the linker comes from; everything
+    # the app renders and reads with is already in the OS.
+    if ! xcode-select -p >/dev/null 2>&1; then
+        echo "missing: Xcode Command Line Tools"
+        missing=1
+    fi
+elif ! command -v pkg-config >/dev/null 2>&1; then
     echo "missing: pkg-config"
     missing=1
 elif ! pkg-config --exists webkit2gtk-4.1; then
@@ -136,6 +149,10 @@ esac
 # from a distro tried last year is not evidence of anything.
 
 detect_desktop() {
+    # macOS has no window manager to configure: the app registers its own
+    # hotkey and sizes its own windows.
+    [ "$os" = "Darwin" ] && { echo macos; return; }
+
     # Lower-cased so the match does not depend on a session calling itself
     # "GNOME", "gnome" or "ubuntu:GNOME".
     local d
@@ -166,7 +183,7 @@ $(printf '%s' "$bold")Next:$(printf '%s' "$off")
      'vault' in it to where your notes should live. Make that directory a git
      repo if you want them synced — it is deliberately separate from this one.
 
-  2. Bind the hotkey. 'photomem daemon' stays warm in the background and
+  2. Set up the hotkey. 'photomem daemon' stays warm in the background and
      'photomem capture' wakes it, which is what makes the popup feel instant.
 EOF
 
@@ -241,6 +258,37 @@ fi
      override that.
 
      Then: $reload
+EOF
+;;
+
+macos)
+    cat <<EOF
+
+     Nothing to bind: photomem registers Ctrl+Alt+N itself, through Carbon's
+     RegisterEventHotKey, so no accessibility permission is asked for and no
+     prompt appears. Change 'hotkey' in config.toml if it clashes.
+
+     To start it at login, write ~/Library/LaunchAgents/dev.soda.photomem.plist:
+
+       <?xml version="1.0" encoding="UTF-8"?>
+       <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+         "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+       <plist version="1.0">
+       <dict>
+         <key>Label</key><string>dev.soda.photomem</string>
+         <key>ProgramArguments</key>
+         <array>
+           <string>$bindir/photomem</string>
+           <string>daemon</string>
+         </array>
+         <key>RunAtLoad</key><true/>
+       </dict>
+       </plist>
+
+     Then: launchctl load ~/Library/LaunchAgents/dev.soda.photomem.plist
+
+     No window rules, and no dock icon to hide — it runs as a menu bar agent
+     and sizes its own windows.
 EOF
 ;;
 

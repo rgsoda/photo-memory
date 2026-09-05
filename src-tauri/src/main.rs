@@ -96,6 +96,14 @@ fn main() {
             commands::fit_image_window,
         ])
         .setup(move |app| {
+            // A capture tool that lives in the menu bar has no business in the
+            // Dock or in Cmd-Tab: it is not something you switch to, it is
+            // something you summon. This is the LSUIElement equivalent, set at
+            // runtime so it holds however the binary was started — an
+            // Info.plist key would only apply to the bundled build.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             app.manage(commands::Search(std::sync::Mutex::new(open_index())));
             #[cfg(target_os = "macos")]
             register_hotkey(app.handle());

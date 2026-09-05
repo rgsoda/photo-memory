@@ -480,6 +480,12 @@ which is the opposite of the rule inside a note, where a missing embed still sho
 filename because there the filename is the information.
 
 **M8 — macOS.** Platform module, menu bar agent, hotkey, LaunchAgent, packaging.
+Done but for the packaging. The hotkey registers through Carbon, so no accessibility
+prompt; the activation policy is set to Accessory at runtime rather than by an
+`Info.plist` key, so it holds however the binary was started and not only for a bundled
+build; `install.sh` covers macOS and prints a LaunchAgent to write. What is left is an
+`.app` bundle and a signed release — the difference between a binary on your PATH and
+something in Applications.
 
 M1–M4 is the smallest thing worth using daily. M5 can wait longer than it feels like it can;
 M6 is the one to protect from being cut when the project gets boring.
