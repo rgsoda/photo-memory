@@ -317,11 +317,11 @@ need is whether it compiles.
 
 ## Not there yet
 
-- No tray icon, so the daemon is stopped with `pkill -x photomem`.
 - Images show in a strip under the editor, not inline in the text.
 - Search has no tag or date filters yet.
-- On macOS the app runs but is not packaged: no `.app` bundle, menu bar agent or
-  LaunchAgent, and `install.sh` is Linux-only (M8).
+- On macOS the app runs with a menu bar icon but is not packaged: no `.app` bundle, no
+  `LSUIElement` so the daemon also keeps a dock icon, no LaunchAgent, and `install.sh` is
+  Linux-only (M8).
 - Tags are inline text, so `#ff0000` in a note about CSS becomes a tag. `#1234` and
   `# heading` do not.
 - No OCR (M6).

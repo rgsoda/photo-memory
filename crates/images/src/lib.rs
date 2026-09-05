@@ -5,6 +5,8 @@
 //! a 1200px long edge and re-encoded as lossy WebP. A 4K screenshot lands around
 //! 80 KB, which is what keeps a decade of daily captures inside a git repo.
 
+pub mod ocr;
+
 use anyhow::{Context, Result};
 use image::{imageops::FilterType, DynamicImage, RgbaImage};
 use sha2::{Digest, Sha256};
