@@ -648,6 +648,10 @@ pub fn open_image<R: Runtime>(
         .center()
         .focused(true)
         .visible(false)
+        // The capture window is always-on-top, so a normal-level window opens
+        // *underneath* the thing that asked for it. macOS honours window levels
+        // strictly; Hyprland's own stacking rules hid this on Linux.
+        .always_on_top(true)
         .build()
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -668,14 +672,27 @@ pub fn fit_image_window<R: Runtime>(
 
     // Never larger than the screen it has to fit on.
     let (mut w, mut h) = (width, height + FOOTER_HEIGHT);
-    if let Some((mw, mh)) = monitor_size(&app) {
+    let screen = monitor_geometry(&app);
+    if let Some((_, _, mw, mh)) = screen {
         let shrink = (mw * 0.95 / w).min(mh * 0.95 / h).min(1.0);
         w *= shrink;
         h *= shrink;
     }
 
     window.set_size(tauri::LogicalSize::new(w, h)).map_err(|e| e.to_string())?;
-    window.center().map_err(|e| e.to_string())?;
+
+    // Centred from the size just asked for, rather than by `center()`, which
+    // measures the window as it currently is. On macOS the resize above is
+    // dispatched to the main thread and has not landed yet, so `center()`
+    // centres the old, smaller geometry and leaves the window sitting off to
+    // one side. Falls back to `center()` only if the monitor is unreadable.
+    match screen {
+        Some((mx, my, mw, mh)) => {
+            let at = tauri::LogicalPosition::new(mx + (mw - w) / 2.0, my + (mh - h) / 2.0);
+            window.set_position(at).map_err(|e| e.to_string())?;
+        }
+        None => window.center().map_err(|e| e.to_string())?,
+    }
     let _ = window.show();
     let _ = window.set_focus();
     Ok(())
@@ -684,10 +701,15 @@ pub fn fit_image_window<R: Runtime>(
 /// Height of the caption and hints strip under the picture.
 const FOOTER_HEIGHT: f64 = 30.0;
 
-fn monitor_size<R: Runtime>(app: &tauri::AppHandle<R>) -> Option<(f64, f64)> {
+/// Position and size of the monitor the capture window is on, in logical
+/// pixels. The position matters: centring on a second monitor has to start from
+/// that monitor's origin, not the desktop's.
+fn monitor_geometry<R: Runtime>(app: &tauri::AppHandle<R>) -> Option<(f64, f64, f64, f64)> {
     let monitor = app.get_webview_window("main")?.current_monitor().ok()??;
-    let logical = monitor.size().to_logical::<f64>(monitor.scale_factor());
-    Some((logical.width, logical.height))
+    let scale = monitor.scale_factor();
+    let size = monitor.size().to_logical::<f64>(scale);
+    let at = monitor.position().to_logical::<f64>(scale);
+    Some((at.x, at.y, size.width, size.height))
 }
 
 #[tauri::command]

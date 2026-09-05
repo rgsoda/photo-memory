@@ -18,13 +18,15 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "resizable": true,
-        "visible": false
+        "visible": false,
+        "transparent": true
       }
     ],
     "security": {
       "csp": "default-src 'self'; img-src 'self' data:"
     },
-    "withGlobalTauri": true
+    "withGlobalTauri": true,
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,

@@ -20,7 +20,13 @@ serde_json = "1"
 anyhow.workspace = true
 # image-png is what lets the tray icon be a PNG rather than raw RGBA typed out
 # at compile time. The tray itself is per-platform, below.
-tauri = { version = "2", features = ["image-png"] }
+#
+# macos-private-api allows a transparent NSWindow, without which an undecorated
+# window paints its own opaque background outside the shell's rounded corners.
+# It is inert off macOS, and has to sit here rather than in the macOS block
+# because tauri-build checks this list against tauri.conf.json and cannot see
+# target-conditional features.
+tauri = { version = "2", features = ["image-png", "macos-private-api"] }
 tauri-plugin-single-instance = "2"
 
 # Reading an image off the clipboard is the one thing that differs by platform.
